@@ -215,4 +215,77 @@ describe('runFallbackPlayer', () => {
     await vi.advanceTimersByTimeAsync(TICK_MS * 5);
     expect(state.screen.pushedFrames.length).toBe(finalCount);
   });
+
+  it('handles two arrow presses batched into one data chunk', async () => {
+    const state = setup();
+    state.keys.press(KEY_ARROW_RIGHT + KEY_ARROW_RIGHT);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.source.seeks).toEqual([5_000, 5_000]);
+    await quit(state);
+  });
+
+  it('pauses and quits from a batched space-then-q chunk', async () => {
+    const state = setup();
+    await vi.advanceTimersByTimeAsync(TICK_MS);
+    state.keys.press(' q');
+    await vi.advanceTimersByTimeAsync(0);
+    await state.done;
+    expect(state.screen.disposeCalls).toBe(1);
+    expect(state.source.closed).toBe(true);
+  });
+
+  it('skips ticks while a frame fetch is in flight', async () => {
+    const screen = createFakeScreen();
+    const keys = createFakeInput();
+    let resolveFrame: (frame: Uint8Array | null) => void = () => {};
+    let getFrameCalls = 0;
+    const source: FrameSource = {
+      open: () => Promise.resolve(INFO),
+      getFrameAt: () => {
+        getFrameCalls += 1;
+        return new Promise((resolve) => {
+          resolveFrame = resolve;
+        });
+      },
+      seek: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const done = runFallbackPlayer({
+      screen: screen.screen,
+      source,
+      info: INFO,
+      input: keys.input,
+    });
+    await vi.advanceTimersByTimeAsync(TICK_MS * 4);
+    // Only the initial fetch happened, every tick hit the in-flight guard
+    expect(getFrameCalls).toBe(1);
+    resolveFrame(new Uint8Array(INFO.width * INFO.height * 3));
+    await vi.advanceTimersByTimeAsync(TICK_MS);
+    expect(getFrameCalls).toBe(2);
+    keys.press('q');
+    await vi.advanceTimersByTimeAsync(0);
+    await done;
+  });
+
+  it('clamps a forward seek at the stream duration', async () => {
+    const state = setup();
+    // Settle the initial frame fetch first, otherwise the first press's
+    // post-seek frame refresh is skipped by the in-flight guard and
+    // elapsedMs lags one press behind
+    await vi.advanceTimersByTimeAsync(0);
+    // Flush twice per press so the whole seek then-chain settles
+    const settleSeek = async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+    };
+    state.keys.press(KEY_ARROW_RIGHT);
+    await settleSeek();
+    state.keys.press(KEY_ARROW_RIGHT);
+    await settleSeek();
+    state.keys.press(KEY_ARROW_RIGHT);
+    await settleSeek();
+    // The third target is 15_000, past the 10_000 ms duration
+    expect(state.source.seeks).toEqual([5_000, 10_000, 10_000]);
+    await quit(state);
+  });
 });

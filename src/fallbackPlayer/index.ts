@@ -13,9 +13,9 @@ export * from './consts.ts';
 export * from './types.ts';
 
 /**
- * Playback loop for half-block fallback mode. No Ink here: the half-block
- * renderer writes cells directly and produces no placeholder rows, so there
- * is nothing for Ink to lay out. This is a plain-function port of
+ * Playback loop for half-block fallback mode. There is no Ink here because
+ * the half-block renderer writes cells directly and produces no placeholder
+ * rows, so there is nothing for Ink to lay out. This is a plain-function port of
  * usePlaybackClock's behavior (a setInterval at the source frame rate, an
  * in-flight guard so async getFrameAt calls never pile up, frames straight
  * to pushFrame), always autoplay and always loop, matching what the cli
@@ -81,32 +81,45 @@ export const runFallbackPlayer = ({
       showFrameAt(nextMs < info.durationMs ? nextMs : nextMs % info.durationMs);
     }, intervalMs);
 
+    const quit = (): void => {
+      clearInterval(interval);
+      input.off('data', onKey);
+      input.setRawMode?.(false);
+      input.pause?.();
+      screen.dispose();
+      void source
+        .close()
+        .catch(noteSourceError)
+        .finally(() => {
+          resolve();
+        });
+    };
+
+    // A single 'data' event can carry several keypresses (arrow auto-repeat
+    // bursts, SSH batching), so scan the chunk instead of comparing it whole
     const onKey = (chunk: Buffer): void => {
-      const key = chunk.toString('utf8');
-      if (key === KEY_QUIT || key === KEY_CTRL_C) {
-        clearInterval(interval);
-        input.off('data', onKey);
-        input.setRawMode?.(false);
-        input.pause?.();
-        screen.dispose();
-        void source
-          .close()
-          .catch(noteSourceError)
-          .finally(() => {
-            resolve();
-          });
-        return;
-      }
-      if (key === KEY_SPACE) {
-        playing = !playing;
-        return;
-      }
-      if (key === KEY_ARROW_RIGHT) {
-        seekToMs(elapsedMs + SEEK_STEP_MS);
-        return;
-      }
-      if (key === KEY_ARROW_LEFT) {
-        seekToMs(elapsedMs - SEEK_STEP_MS);
+      const text = chunk.toString('utf8');
+      let i = 0;
+      while (i < text.length) {
+        if (text.startsWith(KEY_ARROW_RIGHT, i)) {
+          seekToMs(elapsedMs + SEEK_STEP_MS);
+          i += KEY_ARROW_RIGHT.length;
+          continue;
+        }
+        if (text.startsWith(KEY_ARROW_LEFT, i)) {
+          seekToMs(elapsedMs - SEEK_STEP_MS);
+          i += KEY_ARROW_LEFT.length;
+          continue;
+        }
+        const key = text[i];
+        if (key === KEY_QUIT || key === KEY_CTRL_C) {
+          quit();
+          return;
+        }
+        if (key === KEY_SPACE) {
+          playing = !playing;
+        }
+        i += 1;
       }
     };
 
