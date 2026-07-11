@@ -1,4 +1,5 @@
 import type { FallbackReason } from './types.ts';
+import type { RenderMode } from 'kitty-motion';
 
 /**
  * Package version printed by --version. Kept as a literal because importing
@@ -6,6 +7,15 @@ import type { FallbackReason } from './types.ts';
  * with the "version" field in package.json.
  */
 export const VERSION = '0.1.0';
+
+/** Values accepted by --render-mode, kitty-motion's full RenderMode union */
+export const RENDER_MODES: readonly RenderMode[] = [
+  'kitty',
+  'half-block',
+  'cell-background',
+  'emoji',
+  'ascii',
+];
 
 /** Exit code for success paths (help, version, graceful unsupported-terminal exit) */
 export const EXIT_OK = 0;
@@ -23,19 +33,25 @@ Usage:
 Options:
   -h, --help              print this help and exit
   -v, --version           print the version and exit
-      --half-block        play with the half-block cell renderer instead of
+      --fallback          play with the fallback cell renderer instead of
                           kitty graphics (works on any terminal and inside
                           tmux or screen, reduced quality, no on-screen UI)
+      --render-mode <mode>
+                          force a render mode: kitty, half-block,
+                          cell-background, emoji, or ascii. kitty forces the
+                          full player even when detection says unsupported,
+                          cell modes force the fallback player
 
 Controls:
   space                   play or pause
   left/right arrow        seek 5 seconds
   q or Ctrl-C             quit
-  (the same keys work in half-block mode, there is just no on-screen UI)
+  (the same keys work in fallback mode, there is just no on-screen UI)
 
 The full player requires an interactive Kitty or Ghostty terminal (Kitty
 graphics protocol with Unicode placeholder support) outside tmux/screen.
-On other terminals kitty-player offers to play in half-block mode instead.`;
+On other terminals kitty-player offers to play with a fallback cell
+renderer (cell-background on Terminal.app, half-block elsewhere).`;
 
 /** Printed to stderr when stdout is not an interactive terminal */
 export const UNSUPPORTED_TERMINAL_MESSAGE =

@@ -1,11 +1,20 @@
+import type { RenderMode } from 'kitty-motion';
+import { RENDER_MODES } from './consts.ts';
+
 /** Play a video file, or the built-in procedural demo when file is absent */
 export interface PlayAction {
   action: 'play';
   /** Path of the video file to play (the positional argument) */
   file?: string;
-  /** Skip terminal detection and play with the half-block renderer (--half-block) */
-  halfBlock: boolean;
+  /** Skip terminal detection and play with the fallback cell renderer (--fallback) */
+  fallback: boolean;
+  /** Forced render mode (--render-mode). kitty forces the full player, cell modes force the fallback player */
+  renderMode?: RenderMode;
 }
+
+/** True when value is one of kitty-motion's render mode names */
+export const isRenderMode = (value: unknown): value is RenderMode =>
+  typeof value === 'string' && RENDER_MODES.includes(value as RenderMode);
 
 /** Print HELP_TEXT to stdout and exit 0 (--help / -h) */
 export interface HelpAction {

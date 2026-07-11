@@ -7,11 +7,12 @@ import { describe, expect, it } from 'vitest';
 import { parseCliArgs } from './parseCliArgs.ts';
 import { detectFallbackReasons } from './detectFallbackReasons.ts';
 import { confirmFallback } from './confirmFallback.ts';
-import { FALLBACK_PROMPT } from './consts.ts';
+import { FALLBACK_PROMPT, RENDER_MODES } from './consts.ts';
+import { isRenderMode } from './types.ts';
 
 describe('parseCliArgs', () => {
   it('returns play when no arguments are given', () => {
-    expect(parseCliArgs([])).toEqual({ action: 'play', halfBlock: false });
+    expect(parseCliArgs([])).toEqual({ action: 'play', fallback: false });
   });
 
   it('returns help for --help', () => {
@@ -34,19 +35,47 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['movie.mp4'])).toEqual({
       action: 'play',
       file: 'movie.mp4',
-      halfBlock: false,
+      fallback: false,
     });
   });
 
-  it('returns play with halfBlock for --half-block', () => {
-    expect(parseCliArgs(['--half-block'])).toEqual({ action: 'play', halfBlock: true });
+  it('returns play with fallback for --fallback', () => {
+    expect(parseCliArgs(['--fallback'])).toEqual({ action: 'play', fallback: true });
   });
 
-  it('combines --half-block with a file argument', () => {
-    expect(parseCliArgs(['--half-block', 'movie.mp4'])).toEqual({
+  it('combines --fallback with a file argument', () => {
+    expect(parseCliArgs(['--fallback', 'movie.mp4'])).toEqual({
       action: 'play',
       file: 'movie.mp4',
-      halfBlock: true,
+      fallback: true,
+    });
+  });
+
+  it.each(['kitty', 'half-block', 'cell-background', 'emoji', 'ascii'])(
+    'parses --render-mode %s without implying fallback',
+    (mode) => {
+      expect(parseCliArgs(['--render-mode', mode])).toEqual({
+        action: 'play',
+        fallback: false,
+        renderMode: mode,
+      });
+    },
+  );
+
+  it('returns usage-error for an invalid --render-mode value naming the valid modes', () => {
+    const result = parseCliArgs(['--render-mode', 'bogus']);
+    expect(result.action).toBe('usage-error');
+    if (result.action === 'usage-error') {
+      expect(result.message).toContain('bogus');
+      expect(result.message).toContain('cell-background');
+    }
+  });
+
+  it('parses --fallback with --render-mode kitty (the gate owns the conflict)', () => {
+    expect(parseCliArgs(['--fallback', '--render-mode', 'kitty'])).toEqual({
+      action: 'play',
+      fallback: true,
+      renderMode: 'kitty',
     });
   });
 
@@ -77,6 +106,16 @@ describe('parseCliArgs', () => {
   it('returns usage-error for an unknown short flag', () => {
     const result = parseCliArgs(['-x']);
     expect(result.action).toBe('usage-error');
+  });
+});
+
+describe('isRenderMode', () => {
+  it.each([...RENDER_MODES])('accepts %s', (mode) => {
+    expect(isRenderMode(mode)).toBe(true);
+  });
+
+  it.each(['bogus', '', 'KITTY', 42, null, undefined])('rejects %j', (value) => {
+    expect(isRenderMode(value)).toBe(false);
   });
 });
 

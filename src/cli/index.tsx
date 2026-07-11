@@ -52,26 +52,26 @@ if (args.action === 'usage-error') {
   process.exit(EXIT_USAGE);
 }
 
-// A prompt is impossible without a TTY and half-block output to a pipe is
-// garbage, so --half-block does not override this. Exit 0 keeps CI green.
+// A prompt is impossible without a TTY and fallback output to a pipe is
+// garbage, so --fallback does not override this. Exit 0 keeps CI green.
 if (!process.stdout.isTTY) {
   process.stderr.write(`${UNSUPPORTED_TERMINAL_MESSAGE}\n`);
   process.exit(EXIT_OK);
 }
 
 // The kitty-graphics player needs placeholder support outside a multiplexer.
-// When it cannot run, offer half-block mode. --half-block skips both the
-// detection and the prompt (it also forces half-block on a supported
+// When it cannot run, offer fallback mode. --fallback skips both the
+// detection and the prompt (it also forces fallback on a supported
 // terminal, doubling as a test path). This all happens before any Screen or
 // Ink render exists, so the prompt can read stdin in cooked mode.
-let halfBlock = args.halfBlock;
-if (!halfBlock) {
+let fallback = args.fallback;
+if (!fallback) {
   const reasons = detectFallbackReasons();
   if (reasons.length > 0) {
     const reasonLines = reasons.map((reason) => `  - ${FALLBACK_REASON_MESSAGES[reason]}`);
     process.stderr.write(`${FALLBACK_WARNING_HEADER}\n${reasonLines.join('\n')}\n`);
-    halfBlock = await confirmFallback({ input: process.stdin, output: process.stderr });
-    if (!halfBlock) {
+    fallback = await confirmFallback({ input: process.stdin, output: process.stderr });
+    if (!fallback) {
       process.exit(EXIT_OK);
     }
   }
@@ -89,10 +89,10 @@ try {
   process.exit(EXIT_USAGE);
 }
 
-// Half-block mode never touches Ink. The cell renderer owns the whole
+// Fallback mode never touches Ink. The cell renderer owns the whole
 // screen and produces no placeholder rows to lay out. The playback loop
 // resolves when the user quits, with the screen disposed and source closed.
-if (halfBlock) {
+if (fallback) {
   const fallbackScreen = createFallbackScreen(info);
   await runFallbackPlayer({
     screen: fallbackScreen,

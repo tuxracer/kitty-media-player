@@ -1,6 +1,8 @@
 import { parseArgs } from 'node:util';
 
-import type { ParsedCliArgs } from './types.ts';
+import { RENDER_MODES } from './consts.ts';
+import { isRenderMode } from './types.ts';
+import type { ParsedCliArgs, PlayAction } from './types.ts';
 
 /**
  * Pure argv parser for the CLI. It lives in its own file rather than in
@@ -24,7 +26,8 @@ export const parseCliArgs = (argv: string[]): ParsedCliArgs => {
       options: {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
-        'half-block': { type: 'boolean' },
+        fallback: { type: 'boolean' },
+        'render-mode': { type: 'string' },
       },
     });
     if (values.help) {
@@ -33,16 +36,27 @@ export const parseCliArgs = (argv: string[]): ParsedCliArgs => {
     if (values.version) {
       return { action: 'version' };
     }
+    const renderModeValue = values['render-mode'];
+    if (renderModeValue !== undefined && !isRenderMode(renderModeValue)) {
+      return {
+        action: 'usage-error',
+        message: `invalid --render-mode "${renderModeValue}" (valid modes: ${RENDER_MODES.join(', ')})`,
+      };
+    }
     if (positionals.length > 1) {
       return {
         action: 'usage-error',
         message: `unexpected extra arguments: ${positionals.slice(1).join(' ')}`,
       };
     }
+    const play: PlayAction = { action: 'play', fallback: values.fallback === true };
     if (positionals.length === 1) {
-      return { action: 'play', file: positionals[0], halfBlock: values['half-block'] === true };
+      play.file = positionals[0];
     }
-    return { action: 'play', halfBlock: values['half-block'] === true };
+    if (renderModeValue !== undefined && isRenderMode(renderModeValue)) {
+      play.renderMode = renderModeValue;
+    }
+    return play;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { action: 'usage-error', message };
