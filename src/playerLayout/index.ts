@@ -8,7 +8,7 @@ import {
   MIN_AVAILABLE_CELLS,
   PANEL_HORIZONTAL_MARGIN,
 } from './consts.ts';
-import type { PanelRegionOptions } from './types.ts';
+import type { EmbeddedRegionOptions, PanelRegionOptions } from './types.ts';
 
 export * from './consts.ts';
 export * from './types.ts';
@@ -34,4 +34,40 @@ export const computePanelRegion = ({
   const aspectRatio = (sourceWidth / sourceHeight) * CELL_ASPECT_RATIO;
   const { width, height } = fitToTerminal({ availableCols, availableRows, aspectRatio });
   return { offsetCol: 1, offsetRow: 1, cols: width, rows: height };
+};
+
+/**
+ * Compute the placeholder grid for an embedded video box of a fixed cell
+ * size, aspect-fitting the source frame inside it (object-fit: contain).
+ * Offsets stay at 1,1 because the host Ink app owns actual placement.
+ */
+export const computeEmbeddedRegion = ({
+  cols,
+  rows,
+  sourceWidth,
+  sourceHeight,
+}: EmbeddedRegionOptions): ScreenRegion => {
+  const availableCols = Math.max(cols, MIN_AVAILABLE_CELLS);
+  const availableRows = Math.max(rows, MIN_AVAILABLE_CELLS);
+  const aspectRatio = (sourceWidth / sourceHeight) * CELL_ASPECT_RATIO;
+
+  // Try height-first fit: use all available rows, then derive cols by aspect
+  const potentialCols = Math.floor(availableRows * aspectRatio);
+  if (potentialCols <= availableCols) {
+    // Height-first fit works: use all rows and as many cols as aspect allows
+    return {
+      offsetCol: 1,
+      offsetRow: 1,
+      cols: Math.max(potentialCols, MIN_AVAILABLE_CELLS),
+      rows: availableRows,
+    };
+  }
+
+  // Width-constrained: use all available cols and derive rows by aspect
+  return {
+    offsetCol: 1,
+    offsetRow: 1,
+    cols: availableCols,
+    rows: Math.max(Math.floor(availableCols / aspectRatio), MIN_AVAILABLE_CELLS),
+  };
 };
