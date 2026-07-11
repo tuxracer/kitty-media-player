@@ -30,6 +30,7 @@ let largeVideo: string;
 let audioOnly: string;
 let notVideo: string;
 let rotatedVideo: string;
+let noDurationVideo: string;
 
 const FIXTURE_TIMEOUT_MS = 60_000;
 
@@ -43,6 +44,7 @@ beforeAll(async () => {
   audioOnly = join(fixtureDir, 'audio-only.m4a');
   notVideo = join(fixtureDir, 'not-a-video.txt');
   rotatedVideo = join(fixtureDir, 'rotated.mp4');
+  noDurationVideo = join(fixtureDir, 'no-duration.mkv');
   const encode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
   await execFileAsync(ffmpegPath, [
     '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x36:rate=10', ...encode, smallVideo,
@@ -61,6 +63,13 @@ beforeAll(async () => {
   ]);
   await execFileAsync(ffmpegPath, [
     '-display_rotation', '90', '-i', rotatedSource, '-c', 'copy', rotatedVideo,
+  ]);
+
+  // Live-mode matroska writes no duration header, matching what browser
+  // recorders and screen capture tools produce (webm shares the muxer)
+  await execFileAsync(ffmpegPath, [
+    '-f', 'lavfi', '-i', 'testsrc=duration=1:size=64x36:rate=10', ...encode,
+    '-f', 'matroska', '-live', '1', noDurationVideo,
   ]);
 }, FIXTURE_TIMEOUT_MS);
 
@@ -150,6 +159,12 @@ describe('probeFile', () => {
     const probe = await probeFile(rotatedVideo);
     expect(probe.nativeWidth).toBe(36);
     expect(probe.nativeHeight).toBe(64);
+  });
+
+  it('measures duration when the container header lacks one', async () => {
+    const probe = await probeFile(noDurationVideo);
+    expect(probe.durationMs).toBeGreaterThanOrEqual(900);
+    expect(probe.durationMs).toBeLessThanOrEqual(1_100);
   });
 });
 

@@ -18,6 +18,9 @@ export const READAHEAD_FRAME_CAP = 60;
 /** Rolling tail of ffmpeg stderr kept for error reporting */
 export const STDERR_TAIL_MAX_CHARS = 2_048;
 
+/** Microseconds per millisecond, for ffmpeg progress timestamps (out_time_us) */
+export const MICROSECONDS_PER_MS = 1_000;
+
 /** A half rotation in degrees, for reducing display-matrix rotation to its quarter-turn remainder */
 export const HALF_ROTATION_DEGREES = 180;
 

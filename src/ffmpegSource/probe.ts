@@ -2,12 +2,14 @@ import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
+import ffmpegPath from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 
 import {
   HALF_ROTATION_DEGREES,
   MAX_DECODE_HEIGHT,
   MAX_DECODE_WIDTH,
+  MICROSECONDS_PER_MS,
   MS_PER_SECOND,
   QUARTER_ROTATION_DEGREES,
 } from './consts.ts';
@@ -77,9 +79,46 @@ const readRotation = (stream: Record<string, unknown>): number => {
 };
 
 /**
- * Reads the first video stream's metadata with ffprobe. Rejects with
- * FfmpegSourceError: FILE_NOT_FOUND, PROBE_FAILED (unreadable media or
- * missing metadata), or NO_VIDEO_STREAM.
+ * Demuxes the video stream to null at stream-copy speed and reports the last
+ * progress timestamp. Recovers the duration of live-muxed files (browser
+ * recordings, screen captures) whose container header carries none. Reads
+ * the whole file without decoding, so it runs at thousands of times
+ * realtime. Resolves null when the duration still cannot be determined.
+ */
+const measureDurationMs = async (filePath: string): Promise<number | null> => {
+  if (ffmpegPath === null) {
+    return null;
+  }
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(ffmpegPath, [
+      '-hide_banner',
+      '-v', 'error',
+      '-progress', 'pipe:1',
+      '-i', filePath,
+      '-map', '0:v:0',
+      '-c', 'copy',
+      '-f', 'null',
+      '-',
+    ]));
+  } catch {
+    return null;
+  }
+  let lastMicroseconds: number | null = null;
+  for (const match of stdout.matchAll(/^out_time_us=(\d+)$/gm)) {
+    lastMicroseconds = Number(match[1]);
+  }
+  if (lastMicroseconds === null || lastMicroseconds <= 0) {
+    return null;
+  }
+  return Math.round(lastMicroseconds / MICROSECONDS_PER_MS);
+};
+
+/**
+ * Reads the first video stream's metadata with ffprobe. Live-muxed files
+ * without a header duration get theirs measured by a stream-copy scan.
+ * Rejects with FfmpegSourceError: FILE_NOT_FOUND, PROBE_FAILED (unreadable
+ * media or missing metadata), or NO_VIDEO_STREAM.
  */
 export const probeFile = async (filePath: string): Promise<ProbeResult> => {
   try {
@@ -126,19 +165,29 @@ export const probeFile = async (filePath: string): Promise<ProbeResult> => {
   const nativeWidth = asFiniteNumber(video.width);
   const nativeHeight = asFiniteNumber(video.height);
   const fps = parseFrameRate(video.r_frame_rate);
-  const durationSeconds =
+  const headerDurationSeconds =
     asFiniteNumber(video.duration) ??
     (isRecord(parsed.format) ? asFiniteNumber(parsed.format.duration) : null);
 
   if (
     nativeWidth === null || nativeWidth <= 0 ||
     nativeHeight === null || nativeHeight <= 0 ||
-    fps === null ||
-    durationSeconds === null || durationSeconds <= 0
+    fps === null
   ) {
     throw new FfmpegSourceError(
       'PROBE_FAILED',
-      `${filePath}: video stream is missing dimensions, frame rate, or duration`,
+      `${filePath}: video stream is missing dimensions or frame rate`,
+    );
+  }
+
+  const durationMs =
+    headerDurationSeconds !== null && headerDurationSeconds > 0
+      ? Math.round(headerDurationSeconds * MS_PER_SECOND)
+      : await measureDurationMs(filePath);
+  if (durationMs === null || durationMs <= 0) {
+    throw new FfmpegSourceError(
+      'PROBE_FAILED',
+      `${filePath}: could not determine the video duration`,
     );
   }
 
@@ -147,7 +196,7 @@ export const probeFile = async (filePath: string): Promise<ProbeResult> => {
   return {
     nativeWidth: quarterTurned ? nativeHeight : nativeWidth,
     nativeHeight: quarterTurned ? nativeWidth : nativeHeight,
-    durationMs: Math.round(durationSeconds * MS_PER_SECOND),
+    durationMs,
     fps,
   };
 };
