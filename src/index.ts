@@ -9,10 +9,31 @@
  * name ambiguous and silently drop it, so per-module duplicates like
  * MS_PER_SECOND stay internal.
  */
-export { Player, Video } from './Video/index.tsx';
-export type { PlayerProps, PlayerScreen } from './Video/index.tsx';
+export { Player, Video, canDisplayVideo, createManagedScreen } from './Video/index.tsx';
+export type {
+  ExternalVideoProps,
+  ManagedResources,
+  ManagedResourcesOptions,
+  ManagedScreenOptions,
+  ManagedStatus,
+  ManagedVideoProps,
+  PlaybackCallbacks,
+  PlaybackClock,
+  PlaybackClockOptions,
+  PlayerProps,
+  PlayerScreen,
+  VideoBaseProps,
+  VideoErrorCode,
+  VideoLoadedMetadataEvent,
+  VideoProps,
+  VideoRef,
+  VideoTimeUpdateEvent,
+} from './Video/index.tsx';
+export { VideoError, isVideoError } from './Video/index.tsx';
 export {
   HELP_TEXT,
+  LOADING_DELAY_MS,
+  LOADING_TEXT,
   PAUSE_GLYPH,
   PERCENT_MAX,
   PLAY_GLYPH,
@@ -27,8 +48,8 @@ export type { FrameSource, FrameSourceInfo } from './frameSource/index.ts';
 export { createProceduralSource } from './proceduralSource/index.ts';
 export type { ProceduralSourceOptions } from './proceduralSource/index.ts';
 
-export { computePanelRegion } from './playerLayout/index.ts';
-export type { PanelRegionOptions } from './playerLayout/index.ts';
+export { computeEmbeddedRegion, computePanelRegion } from './playerLayout/index.ts';
+export type { EmbeddedRegionOptions, PanelRegionOptions } from './playerLayout/index.ts';
 export {
   CELL_ASPECT_RATIO,
   CHROME_ROWS,

@@ -60,6 +60,54 @@ a hue-cycling ball moving on a Lissajous path over a 20 second loop.
 - Ink itself redraws only when the displayed whole second changes (the time readout and progress bar), roughly once per second
 - On terminal resize the panel region is recomputed, the placeholder rows are re-read (the grid size can change), and the current frame is repainted
 
+## Embedding in your own Ink app
+
+kitty-player exports a `Video` component with an API shaped like the HTML5
+`<video>` element. Mount it anywhere in your Ink tree. It sizes itself to
+`width` x `height` terminal cells and letterboxes the video inside that box.
+No setup call is needed. The component never reads stdin, so it cannot fight
+Ink for input.
+
+```tsx
+import { render, Text, useInput } from "ink";
+import { useRef } from "react";
+import { Video } from "kitty-player";
+import type { VideoRef } from "kitty-player";
+
+const App = () => {
+  const video = useRef<VideoRef>(null);
+
+  useInput((input) => {
+    if (input === " ") {
+      if (video.current?.paused) {
+        void video.current.play();
+      } else {
+        video.current?.pause();
+      }
+    }
+  });
+
+  return (
+    <Video ref={video} src="cat.mp4" width={40} height={12} autoPlay loop controls>
+      <Text dimColor>video needs kitty graphics support</Text>
+    </Video>
+  );
+};
+
+render(<App />);
+```
+
+The children render when the terminal cannot display video, exactly like the
+inner content of an HTML5 `<video>` tag. `srcObject` accepts any
+`FrameSource` implementation instead of a file path. Events (`onTimeUpdate`,
+`onLoadedMetadata`, `onEnded`, `onPlay`, `onPause`, `onError`) and the ref
+handle (`play()`, `pause()`, `currentTime`, `paused`, `ended`, `duration`,
+`videoWidth`, `videoHeight`) follow the DOM element, with times in seconds.
+
+Hosts that need full control (a custom Screen, non-Ink renderers) can keep
+creating resources themselves and pass `screen`, `source`, and `info`, the
+way the CLI does.
+
 ## Library use
 
 The package also exports the pieces for embedding a player panel in your own Ink app: `Player`, the `FrameSource`/`FrameSourceInfo` contract, `createProceduralSource`, `createFfmpegSource`, `computePanelRegion`, and `formatTime`.
