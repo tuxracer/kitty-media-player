@@ -35,6 +35,10 @@ export const Video = ({
   info,
   autoPlay = false,
   loop = false,
+  controls = false,
+  keyboard = false,
+  title = false,
+  help = false,
   onTimeUpdate,
   onLoadedMetadata,
   onPlay,
@@ -76,25 +80,28 @@ export const Video = ({
     });
   }, [info]);
 
-  useInput((input, key) => {
-    if (input === 'q' || (key.ctrl && input === 'c')) {
-      screen.dispose();
-      void source.close().catch(noteSourceError);
-      exit();
-      return;
-    }
-    if (input === ' ') {
-      togglePlay();
-      return;
-    }
-    if (key.leftArrow) {
-      seekToMs(getElapsedMs() - SEEK_STEP_MS);
-      return;
-    }
-    if (key.rightArrow) {
-      seekToMs(getElapsedMs() + SEEK_STEP_MS);
-    }
-  });
+  useInput(
+    (input, key) => {
+      if (input === 'q' || (key.ctrl && input === 'c')) {
+        screen.dispose();
+        void source.close().catch(noteSourceError);
+        exit();
+        return;
+      }
+      if (input === ' ') {
+        togglePlay();
+        return;
+      }
+      if (key.leftArrow) {
+        seekToMs(getElapsedMs() - SEEK_STEP_MS);
+        return;
+      }
+      if (key.rightArrow) {
+        seekToMs(getElapsedMs() + SEEK_STEP_MS);
+      }
+    },
+    { isActive: keyboard },
+  );
 
   // Terminal resizes relayout the panel, debounced so a drag-resize settles
   // before the region changes. Placeholder rows must be re-read after
@@ -136,25 +143,29 @@ export const Video = ({
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
-        {PLAYER_TITLE}
-      </Text>
-      <Box flexDirection="column" marginTop={1}>
+      {title ? (
+        <Text bold color="cyan">
+          {PLAYER_TITLE}
+        </Text>
+      ) : null}
+      <Box flexDirection="column" marginTop={title ? 1 : 0}>
         {placeholderRows.map((row, i) => (
           <Text key={i}>{row}</Text>
         ))}
       </Box>
-      <Box marginTop={1}>
-        <Text>{clock.playing ? PLAY_GLYPH : PAUSE_GLYPH} </Text>
-        <Box width={PROGRESS_BAR_WIDTH}>
-          <ProgressBar value={progressPercent} />
+      {controls ? (
+        <Box marginTop={1}>
+          <Text>{clock.playing ? PLAY_GLYPH : PAUSE_GLYPH} </Text>
+          <Box width={PROGRESS_BAR_WIDTH}>
+            <ProgressBar value={progressPercent} />
+          </Box>
+          <Text>
+            {' '}
+            {formatTime(clock.elapsedMs)} / {formatTime(info.durationMs)}
+          </Text>
         </Box>
-        <Text>
-          {' '}
-          {formatTime(clock.elapsedMs)} / {formatTime(info.durationMs)}
-        </Text>
-      </Box>
-      <Text dimColor>{HELP_TEXT}</Text>
+      ) : null}
+      {help ? <Text dimColor>{HELP_TEXT}</Text> : null}
     </Box>
   );
 };

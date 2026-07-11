@@ -75,5 +75,13 @@ export interface PlayerProps extends PlaybackCallbacks {
   autoPlay?: boolean;
   /** Wrap to the start at the end instead of stopping (HTML5 default: off) */
   loop?: boolean;
+  /** Render the one-row progress/time bar below the video */
+  controls?: boolean;
+  /** Bind the CLI key set: space play/pause, arrows seek, q/ctrl-c quit */
+  keyboard?: boolean;
+  /** Render the title row above the video */
+  title?: boolean;
+  /** Render the help row below the controls */
+  help?: boolean;
   onLoadedMetadata?: (event: VideoLoadedMetadataEvent) => void;
 }

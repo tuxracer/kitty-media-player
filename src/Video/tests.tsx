@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { FrameSourceInfo } from '../frameSource/index.ts';
 import { createProceduralSource } from '../proceduralSource/index.ts';
-import { PAUSE_GLYPH, PLAY_GLYPH, Player, Video } from './index.tsx';
+import { HELP_TEXT, PAUSE_GLYPH, PLAY_GLYPH, PLAYER_TITLE, Player, Video } from './index.tsx';
 import type { PlayerScreen } from './index.tsx';
 
 // Let queued microtasks and immediates settle (getFrameAt/seek promise chains)
@@ -63,7 +63,7 @@ describe('Player', () => {
   it('renders the placeholder rows and the time text', async () => {
     const { harness, source, info } = await setup();
     const { lastFrame, unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay />,
+      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 
@@ -80,7 +80,7 @@ describe('Player', () => {
   it('toggles the pause glyph on space', async () => {
     const { harness, source, info } = await setup();
     const { lastFrame, stdin, unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay />,
+      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
     expect(lastFrame()).toContain(PLAY_GLYPH);
@@ -99,7 +99,7 @@ describe('Player', () => {
   it('pushes the initial frame to the screen', async () => {
     const { harness, source, info } = await setup();
     const { unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay />,
+      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 
@@ -111,7 +111,7 @@ describe('Player', () => {
   it('seeks forward on right arrow and updates the time text', async () => {
     const { harness, source, info } = await setup();
     const { lastFrame, stdin, unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay />,
+      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 
@@ -125,7 +125,7 @@ describe('Player', () => {
   it('stops pushing frames after unmount', async () => {
     const { harness, source, info } = await setup();
     const { unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay />,
+      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 
@@ -143,7 +143,7 @@ describe('Video playback semantics', () => {
   it('mounts paused on the first frame without autoPlay', async () => {
     const { harness, source, info } = await setup();
     const { lastFrame, unmount } = render(
-      <Video screen={harness.screen} source={source} info={info} />,
+      <Video screen={harness.screen} source={source} info={info} controls />,
     );
     await flush();
 
@@ -185,6 +185,8 @@ describe('Video playback semantics', () => {
         source={source}
         info={info}
         autoPlay
+        keyboard
+        controls
         onTimeUpdate={onTimeUpdate}
       />,
     );
@@ -208,6 +210,8 @@ describe('Video playback semantics', () => {
         source={source}
         info={info}
         autoPlay
+        keyboard
+        controls
         onPlay={onPlay}
         onPause={onPause}
       />,
@@ -231,7 +235,15 @@ describe('Video playback semantics', () => {
     const harness = createFakeScreen();
     const onEnded = vi.fn();
     const { lastFrame, unmount } = render(
-      <Video screen={harness.screen} source={source} info={info} autoPlay onEnded={onEnded} />,
+      <Video
+        screen={harness.screen}
+        source={source}
+        info={info}
+        autoPlay
+        keyboard
+        controls
+        onEnded={onEnded}
+      />,
     );
 
     // 100ms duration at 30fps ends within a few ticks
@@ -256,6 +268,8 @@ describe('Video playback semantics', () => {
         info={info}
         autoPlay
         loop
+        keyboard
+        controls
         onEnded={onEnded}
       />,
     );
@@ -265,6 +279,54 @@ describe('Video playback semantics', () => {
 
     expect(onEnded).not.toHaveBeenCalled();
     expect(lastFrame()).toContain(PLAY_GLYPH);
+
+    unmount();
+  });
+});
+
+describe('Video chrome and keyboard gating', () => {
+  it('renders only the video rows by default', async () => {
+    const { harness, source, info } = await setup();
+    const { lastFrame, unmount } = render(
+      <Video screen={harness.screen} source={source} info={info} />,
+    );
+    await flush();
+
+    const frame = lastFrame();
+    expect(frame).toContain('row0');
+    expect(frame).not.toContain(PLAYER_TITLE.trim());
+    expect(frame).not.toContain(HELP_TEXT);
+    expect(frame).not.toContain(PAUSE_GLYPH);
+    expect(frame).not.toContain('0:00');
+
+    unmount();
+  });
+
+  it('ignores keys unless keyboard is set', async () => {
+    const { harness, source, info } = await setup();
+    const { lastFrame, stdin, unmount } = render(
+      <Video screen={harness.screen} source={source} info={info} autoPlay controls />,
+    );
+    await flush();
+    expect(lastFrame()).toContain(PLAY_GLYPH);
+
+    stdin.write(' ');
+    await flush();
+    expect(lastFrame()).toContain(PLAY_GLYPH);
+
+    unmount();
+  });
+
+  it('shows title and help when requested', async () => {
+    const { harness, source, info } = await setup();
+    const { lastFrame, unmount } = render(
+      <Video screen={harness.screen} source={source} info={info} title help />,
+    );
+    await flush();
+
+    const frame = lastFrame();
+    expect(frame).toContain(PLAYER_TITLE.trim());
+    expect(frame).toContain(HELP_TEXT);
 
     unmount();
   });
