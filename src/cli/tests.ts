@@ -141,4 +141,12 @@ describe('confirmFallback', () => {
     const { accepted } = await ask(undefined);
     expect(accepted).toBe(false);
   });
+
+  it('declines when the input stream errors', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const pending = confirmFallback({ input, output });
+    input.emit('error', new Error('boom'));
+    await expect(pending).resolves.toBe(false);
+  });
 });
