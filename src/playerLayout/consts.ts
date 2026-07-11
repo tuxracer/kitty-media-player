@@ -21,8 +21,9 @@ export const CHROME_ROWS = 5;
 export const CELL_ASPECT_RATIO = 2;
 
 /**
- * Floor for the available cols/rows passed to fitToTerminal. fitToTerminal
- * clamps its own output, but this keeps tiny terminals from producing zero
- * or negative available space on the way in.
+ * Floor for box dimensions in both computePanelRegion (passed to
+ * fitToTerminal) and computeEmbeddedRegion (applied directly in height-first
+ * and width-constrained fits). Prevents calculations from producing zero or
+ * negative dimensions.
  */
 export const MIN_AVAILABLE_CELLS = 1;
