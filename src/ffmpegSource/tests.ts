@@ -196,4 +196,39 @@ describe('createFfmpegSource', () => {
     await expect(source.getFrameAt(3_000)).resolves.toBeNull();
     await source.close();
   });
+
+  it('seek lands on the same frame sequential playback reaches', async () => {
+    const source = createFfmpegSource({ filePath: smallVideo });
+    await source.open();
+    const sequential = await waitForFrame(source, 1_500);
+    await source.seek(1_500);
+    const sought = await waitForFrame(source, 1_500);
+    expect(sought).toEqual(sequential);
+    await source.close();
+  });
+
+  it('recovers from a backward time jump (the loop-around path)', async () => {
+    const source = createFfmpegSource({ filePath: smallVideo });
+    await source.open();
+    await waitForFrame(source, 1_500);
+    const rewound = await waitForFrame(source, 200);
+
+    const fresh = createFfmpegSource({ filePath: smallVideo });
+    await fresh.open();
+    const expected = await waitForFrame(fresh, 200);
+    expect(rewound).toEqual(expected);
+
+    await source.close();
+    await fresh.close();
+  });
+
+  it('resolves null from getFrameAt after close, and close is idempotent', async () => {
+    const source = createFfmpegSource({ filePath: smallVideo });
+    await source.open();
+    await waitForFrame(source, 0);
+    await source.close();
+    await expect(source.getFrameAt(0)).resolves.toBeNull();
+    await expect(source.close()).resolves.toBeUndefined();
+    await expect(source.getFrameAt(100)).resolves.toBeNull();
+  });
 });
