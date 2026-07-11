@@ -24,3 +24,9 @@ export const PAUSE_GLYPH = '⏸';
 
 /** Help line under the controls */
 export const HELP_TEXT = 'space play/pause · ←/→ seek 5s · q quit';
+
+/** Wait this long before showing the loading note, so fast opens never flash it */
+export const LOADING_DELAY_MS = 1_000;
+
+/** Shown centered in the reserved box while the source opens slowly */
+export const LOADING_TEXT = 'loading video…';

@@ -4,9 +4,11 @@ import type { ReactElement } from 'react';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
 import { formatTime } from '../formatTime/index.ts';
-import { computePanelRegion } from '../playerLayout/index.ts';
+import { computeEmbeddedRegion, computePanelRegion } from '../playerLayout/index.ts';
 import {
   HELP_TEXT,
+  LOADING_DELAY_MS,
+  LOADING_TEXT,
   MS_PER_SECOND,
   PAUSE_GLYPH,
   PERCENT_MAX,
@@ -16,46 +18,63 @@ import {
   RESIZE_DEBOUNCE_MS,
   SEEK_STEP_MS,
 } from './consts.ts';
-import type { PlayerProps, VideoRef } from './types.ts';
+import type { VideoProps, VideoRef } from './types.ts';
+import { useManagedResources } from './useManagedResources.ts';
 import { usePlaybackClock } from './usePlaybackClock.ts';
 
 export * from './consts.ts';
 export * from './types.ts';
+export { canDisplayVideo, createManagedScreen } from './managedScreen.ts';
+export { useManagedResources } from './useManagedResources.ts';
 export { usePlaybackClock } from './usePlaybackClock.ts';
 
 /**
- * Ink video component. kitty-motion owns the video pixels (pushed into
- * placeholder cells that Ink lays out as ordinary text). React state only
- * mirrors what the chrome displays, so Ink redraws about once per second
- * while frames update at the source frame rate.
+ * Ink video component with an HTML5-video-shaped API. kitty-motion owns the
+ * video pixels (pushed into placeholder cells that Ink lays out as ordinary
+ * text). React state only mirrors what the chrome displays, so Ink redraws
+ * about once per second while frames update at the source frame rate.
+ *
+ * Two modes, discriminated on the screen prop. Without it (self-managed) the
+ * component creates its own Screen and source from src or srcObject, sized
+ * by the width and height props in cells. With it (external resources) the
+ * host owns the Screen and source lifecycle, as the CLI does.
  */
-export const Video = forwardRef<VideoRef, PlayerProps>(
-  (
-    {
-      screen,
-      source,
-      info,
-      autoPlay = false,
-      loop = false,
-      controls = false,
-      keyboard = false,
-      title = false,
-      help = false,
-      onTimeUpdate,
-      onLoadedMetadata,
-      onPlay,
-      onPause,
-      onEnded,
-      onError,
-    },
-    ref,
-  ): ReactElement => {
+export const Video = forwardRef<VideoRef, VideoProps>((props, ref): ReactElement => {
+  const {
+    autoPlay = false,
+    loop = false,
+    controls = false,
+    keyboard = false,
+    title = false,
+    help = false,
+    children,
+    onTimeUpdate,
+    onLoadedMetadata,
+    onPlay,
+    onPause,
+    onEnded,
+    onError,
+  } = props;
+  const external = props.screen !== undefined;
+
   const { exit } = useApp();
   const { stdout } = useStdout();
 
-  const [placeholderRows, setPlaceholderRows] = useState<string[]>(() =>
-    screen.getPlaceholderRows(),
-  );
+  const managed = useManagedResources({
+    enabled: !external,
+    src: props.screen === undefined ? props.src : undefined,
+    srcObject: props.screen === undefined ? props.srcObject : undefined,
+    width: props.screen === undefined ? props.width : 0,
+    height: props.screen === undefined ? props.height : 0,
+    onLoadedMetadata,
+    onError,
+  });
+
+  const screen = props.screen === undefined ? managed.screen : props.screen;
+  const source = props.screen === undefined ? managed.source : props.source;
+  const info = props.screen === undefined ? managed.info : props.info;
+
+  const [placeholderRows, setPlaceholderRows] = useState<string[]>([]);
 
   const clock = usePlaybackClock({
     screen,
@@ -63,7 +82,7 @@ export const Video = forwardRef<VideoRef, PlayerProps>(
     info,
     autoPlay,
     loop,
-    stderrNote: true,
+    stderrNote: external,
     onTimeUpdate,
     onPlay,
     onPause,
@@ -95,35 +114,42 @@ export const Video = forwardRef<VideoRef, PlayerProps>(
         return clock.ended;
       },
       get duration(): number {
-        return info.durationMs / MS_PER_SECOND;
+        return info === null ? Number.NaN : info.durationMs / MS_PER_SECOND;
       },
       get videoWidth(): number {
-        return info.width;
+        return info?.width ?? 0;
       },
       get videoHeight(): number {
-        return info.height;
+        return info?.height ?? 0;
       },
     }),
     [clock, info],
   );
 
   // HTML5 fires loadedmetadata once dimensions and duration are known. In
-  // external mode they are known at mount.
+  // external mode they are known at mount (managed mode fires from its hook).
   const onLoadedMetadataRef = useRef(onLoadedMetadata);
   onLoadedMetadataRef.current = onLoadedMetadata;
   useEffect(() => {
-    onLoadedMetadataRef.current?.({
-      videoWidth: info.width,
-      videoHeight: info.height,
-      duration: info.durationMs / MS_PER_SECOND,
-    });
-  }, [info]);
+    if (external && info !== null) {
+      onLoadedMetadataRef.current?.({
+        videoWidth: info.width,
+        videoHeight: info.height,
+        duration: info.durationMs / MS_PER_SECOND,
+      });
+    }
+  }, [external, info]);
+
+  // Placeholder rows track the active screen (arrives async in managed mode)
+  useEffect(() => {
+    setPlaceholderRows(screen === null ? [] : screen.getPlaceholderRows());
+  }, [screen]);
 
   useInput(
     (input, key) => {
       if (input === 'q' || (key.ctrl && input === 'c')) {
-        screen.dispose();
-        void source.close().catch(noteSourceError);
+        screen?.dispose();
+        void source?.close().catch(noteSourceError);
         exit();
         return;
       }
@@ -139,13 +165,16 @@ export const Video = forwardRef<VideoRef, PlayerProps>(
         seekToMs(getElapsedMs() + SEEK_STEP_MS);
       }
     },
-    { isActive: keyboard },
+    { isActive: keyboard && screen !== null },
   );
 
-  // Terminal resizes relayout the panel, debounced so a drag-resize settles
-  // before the region changes. Placeholder rows must be re-read after
-  // setRegion because the grid size can change.
+  // External mode: terminal resizes relayout the panel, debounced so a
+  // drag-resize settles before the region changes. Placeholder rows must be
+  // re-read after setRegion because the grid size can change.
   useEffect(() => {
+    if (!external || screen === null || info === null) {
+      return;
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onResize = (): void => {
       if (timer !== undefined) {
@@ -170,15 +199,83 @@ export const Video = forwardRef<VideoRef, PlayerProps>(
         clearTimeout(timer);
       }
     };
-  }, [info.height, info.width, repaint, screen, stdout]);
+  }, [external, info, repaint, screen, stdout]);
 
+  // Managed mode: width/height prop changes recompute the letterbox region.
+  // Same gotcha as resize, rows must be re-read after setRegion.
+  const managedWidth = props.screen === undefined ? props.width : 0;
+  const managedHeight = props.screen === undefined ? props.height : 0;
+  useEffect(() => {
+    if (external || screen === null || info === null) {
+      return;
+    }
+    const region = computeEmbeddedRegion({
+      cols: managedWidth,
+      rows: managedHeight,
+      sourceWidth: info.width,
+      sourceHeight: info.height,
+    });
+    screen.setRegion(region);
+    setPlaceholderRows(screen.getPlaceholderRows());
+    repaint();
+  }, [external, info, managedHeight, managedWidth, repaint, screen]);
+
+  // Loading indicator, delayed so fast opens never flash it
+  const [showLoading, setShowLoading] = useState(false);
+  useEffect(() => {
+    if (external || managed.status !== 'loading') {
+      setShowLoading(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setShowLoading(true);
+    }, LOADING_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [external, managed.status]);
+
+  if (props.screen === undefined) {
+    if (managed.status === 'unsupported' || managed.status === 'error') {
+      return (
+        <Box
+          width={props.width}
+          height={props.height}
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+        >
+          {children}
+        </Box>
+      );
+    }
+    if (managed.status === 'loading') {
+      return (
+        <Box
+          width={props.width}
+          height={props.height}
+          justifyContent="center"
+          alignItems="center"
+        >
+          {showLoading ? <Text dimColor>{LOADING_TEXT}</Text> : null}
+        </Box>
+      );
+    }
+  }
+
+  const durationMs = info?.durationMs ?? 0;
   const progressPercent =
-    info.durationMs > 0
-      ? Math.min(
-          Math.max(Math.round((clock.elapsedMs / info.durationMs) * PERCENT_MAX), 0),
-          PERCENT_MAX,
-        )
+    durationMs > 0
+      ? Math.min(Math.max(Math.round((clock.elapsedMs / durationMs) * PERCENT_MAX), 0), PERCENT_MAX)
       : 0;
+
+  const rows = (
+    <Box flexDirection="column">
+      {placeholderRows.map((row, i) => (
+        <Text key={i}>{row}</Text>
+      ))}
+    </Box>
+  );
 
   return (
     <Box flexDirection="column">
@@ -187,11 +284,21 @@ export const Video = forwardRef<VideoRef, PlayerProps>(
           {PLAYER_TITLE}
         </Text>
       ) : null}
-      <Box flexDirection="column" marginTop={title ? 1 : 0}>
-        {placeholderRows.map((row, i) => (
-          <Text key={i}>{row}</Text>
-        ))}
-      </Box>
+      {props.screen === undefined ? (
+        <Box
+          width={props.width}
+          height={props.height}
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+        >
+          {rows}
+        </Box>
+      ) : (
+        <Box flexDirection="column" marginTop={title ? 1 : 0}>
+          {rows}
+        </Box>
+      )}
       {controls ? (
         <Box marginTop={1}>
           <Text>{clock.playing ? PLAY_GLYPH : PAUSE_GLYPH} </Text>
@@ -200,15 +307,14 @@ export const Video = forwardRef<VideoRef, PlayerProps>(
           </Box>
           <Text>
             {' '}
-            {formatTime(clock.elapsedMs)} / {formatTime(info.durationMs)}
+            {formatTime(clock.elapsedMs)} / {formatTime(durationMs)}
           </Text>
         </Box>
       ) : null}
       {help ? <Text dimColor>{HELP_TEXT}</Text> : null}
     </Box>
   );
-  },
-);
+});
 
 Video.displayName = 'Video';
 

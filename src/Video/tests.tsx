@@ -1,11 +1,27 @@
+import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { createRef } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
 import { createProceduralSource } from '../proceduralSource/index.ts';
-import { HELP_TEXT, PAUSE_GLYPH, PLAY_GLYPH, PLAYER_TITLE, Player, Video } from './index.tsx';
+import {
+  HELP_TEXT,
+  isVideoError,
+  PAUSE_GLYPH,
+  PLAY_GLYPH,
+  PLAYER_TITLE,
+  Player,
+  Video,
+} from './index.tsx';
 import type { PlayerScreen, VideoRef } from './index.tsx';
+
+const managedScreenMocks = vi.hoisted(() => ({
+  canDisplayVideo: vi.fn((): boolean => true),
+  createManagedScreen: vi.fn(),
+}));
+
+vi.mock('./managedScreen.ts', () => managedScreenMocks);
 
 // Let queued microtasks and immediates settle (getFrameAt/seek promise chains)
 const flush = async (): Promise<void> => {
@@ -429,6 +445,143 @@ describe('VideoRef', () => {
 
     expect(fake.seeks).toContain(5_000);
     expect(ref.current?.currentTime).toBe(5);
+
+    unmount();
+  });
+});
+
+describe('Video self-managed mode', () => {
+  const INFO: FrameSourceInfo = {
+    width: 1920,
+    height: 1080,
+    colorSpace: 'rgb24',
+    durationMs: 20_000,
+    fps: 30,
+  };
+
+  beforeEach(() => {
+    managedScreenMocks.canDisplayVideo.mockReturnValue(true);
+    managedScreenMocks.createManagedScreen.mockReset();
+  });
+
+  it('opens the srcObject, creates a letterboxed screen, and renders its rows', async () => {
+    const harness = createFakeScreen();
+    managedScreenMocks.createManagedScreen.mockReturnValue(harness.screen);
+    const fake = createFakeSource(INFO);
+    const onLoadedMetadata = vi.fn();
+    const { lastFrame, unmount } = render(
+      <Video srcObject={fake.source} width={40} height={12} onLoadedMetadata={onLoadedMetadata} />,
+    );
+    await flush();
+
+    expect(lastFrame()).toContain('row0');
+    expect(onLoadedMetadata).toHaveBeenCalledWith({
+      videoWidth: 1920,
+      videoHeight: 1080,
+      duration: 20,
+    });
+    // 1920x1080 in a 40x12 box aspect-fits to 40x11 (see computeEmbeddedRegion tests)
+    expect(managedScreenMocks.createManagedScreen).toHaveBeenCalledWith({
+      region: { offsetCol: 1, offsetRow: 1, cols: 40, rows: 11 },
+      sourceWidth: 1920,
+      sourceHeight: 1080,
+      colorSpace: 'rgb24',
+    });
+
+    unmount();
+  });
+
+  it('renders children and never opens the source when the terminal is unsupported', async () => {
+    managedScreenMocks.canDisplayVideo.mockReturnValue(false);
+    const open = vi.fn();
+    const source: FrameSource = {
+      open,
+      getFrameAt: () => Promise.resolve(null),
+      seek: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { lastFrame, unmount } = render(
+      <Video srcObject={source} width={40} height={12}>
+        <Text>no video here</Text>
+      </Video>,
+    );
+    await flush();
+
+    expect(lastFrame()).toContain('no video here');
+    expect(open).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
+  it('disposes the screen and closes the source on unmount', async () => {
+    const harness = createFakeScreen();
+    managedScreenMocks.createManagedScreen.mockReturnValue(harness.screen);
+    const close = vi.fn(() => Promise.resolve());
+    const fake = createFakeSource(INFO);
+    const source: FrameSource = { ...fake.source, close };
+    const { unmount } = render(<Video srcObject={source} width={40} height={12} />);
+    await flush();
+
+    unmount();
+    await flush();
+
+    expect(harness.disposeCalls).toBe(1);
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('reports a typed error and renders children when no source prop is given', async () => {
+    const onError = vi.fn();
+    const { lastFrame, unmount } = render(
+      <Video width={40} height={12} onError={onError}>
+        <Text>broken</Text>
+      </Video>,
+    );
+    await flush();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    const error: unknown = onError.mock.calls[0]?.[0];
+    expect(isVideoError(error) && error.code === 'INVALID_SRC').toBe(true);
+    expect(lastFrame()).toContain('broken');
+
+    unmount();
+  });
+
+  it('reports open failures through onError and renders children', async () => {
+    const failure = new Error('probe failed');
+    const source: FrameSource = {
+      open: () => Promise.reject(failure),
+      getFrameAt: () => Promise.resolve(null),
+      seek: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const onError = vi.fn();
+    const { lastFrame, unmount } = render(
+      <Video srcObject={source} width={40} height={12} onError={onError}>
+        <Text>broken</Text>
+      </Video>,
+    );
+    await flush();
+
+    expect(onError).toHaveBeenCalledWith(failure);
+    expect(lastFrame()).toContain('broken');
+
+    unmount();
+  });
+
+  it('recomputes the region when width or height props change', async () => {
+    const harness = createFakeScreen();
+    managedScreenMocks.createManagedScreen.mockReturnValue(harness.screen);
+    const fake = createFakeSource(INFO);
+    const { rerender, unmount } = render(
+      <Video srcObject={fake.source} width={40} height={12} />,
+    );
+    await flush();
+    const callsBefore = harness.setRegionCalls;
+
+    rerender(<Video srcObject={fake.source} width={40} height={8} />);
+    await flush();
+
+    expect(harness.setRegionCalls).toBeGreaterThan(callsBefore);
 
     unmount();
   });

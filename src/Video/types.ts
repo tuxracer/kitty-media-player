@@ -1,4 +1,5 @@
-import type { ScreenRegion } from 'kitty-motion';
+import type { ColorSpace, ScreenRegion } from 'kitty-motion';
+import type { ReactNode } from 'react';
 
 import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
 
@@ -82,10 +83,52 @@ export interface VideoRef {
   readonly videoHeight: number;
 }
 
-export interface PlayerProps extends PlaybackCallbacks {
-  screen: PlayerScreen;
-  source: FrameSource;
-  info: FrameSourceInfo;
+export interface ManagedScreenOptions {
+  region: ScreenRegion;
+  sourceWidth: number;
+  sourceHeight: number;
+  colorSpace: ColorSpace;
+}
+
+export type ManagedStatus = 'unsupported' | 'loading' | 'error' | 'ready';
+
+export interface ManagedResources {
+  status: ManagedStatus;
+  screen: PlayerScreen | null;
+  source: FrameSource | null;
+  info: FrameSourceInfo | null;
+}
+
+export interface ManagedResourcesOptions {
+  /** False in external-resources mode, the hook then idles */
+  enabled: boolean;
+  /** Video file path, decoded with the bundled ffmpeg */
+  src?: string;
+  /** A FrameSource not yet opened, mirrors HTMLMediaElement.srcObject */
+  srcObject?: FrameSource;
+  /** Panel box width in terminal cells */
+  width: number;
+  /** Panel box height in terminal cells */
+  height: number;
+  onLoadedMetadata?: (event: VideoLoadedMetadataEvent) => void;
+  onError?: (error: unknown) => void;
+}
+
+export type VideoErrorCode = 'INVALID_SRC';
+
+export class VideoError extends Error {
+  readonly code: VideoErrorCode;
+  constructor(code: VideoErrorCode) {
+    super(code);
+    this.name = 'VideoError';
+    this.code = code;
+  }
+}
+
+export const isVideoError = (error: unknown): error is VideoError =>
+  error instanceof VideoError;
+
+export interface VideoBaseProps extends PlaybackCallbacks {
   /** Start playback on mount (HTML5 default: off) */
   autoPlay?: boolean;
   /** Wrap to the start at the end instead of stopping (HTML5 default: off) */
@@ -98,5 +141,32 @@ export interface PlayerProps extends PlaybackCallbacks {
   title?: boolean;
   /** Render the help row below the controls */
   help?: boolean;
+  /** Rendered when the terminal cannot display video, like <video> children */
+  children?: ReactNode;
   onLoadedMetadata?: (event: VideoLoadedMetadataEvent) => void;
 }
+
+export interface ExternalVideoProps extends VideoBaseProps {
+  /** Host-created Screen. Its presence selects external-resources mode */
+  screen: PlayerScreen;
+  /** An already-opened source, the host owns its lifecycle */
+  source: FrameSource;
+  info: FrameSourceInfo;
+}
+
+export interface ManagedVideoProps extends VideoBaseProps {
+  screen?: undefined;
+  /** Video file path, decoded with the bundled ffmpeg */
+  src?: string;
+  /** A FrameSource not yet opened, mirrors HTMLMediaElement.srcObject */
+  srcObject?: FrameSource;
+  /** Panel box width in terminal cells */
+  width: number;
+  /** Panel box height in terminal cells */
+  height: number;
+}
+
+export type VideoProps = ExternalVideoProps | ManagedVideoProps;
+
+/** Kept for existing library consumers, Player is an alias of Video */
+export type PlayerProps = VideoProps;
