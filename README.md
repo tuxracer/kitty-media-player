@@ -6,12 +6,13 @@ A terminal video player. The UI (title, progress bar, controls) is an [Ink](http
 
 - Node.js >= 24
 - An interactive Kitty or Ghostty terminal (Kitty graphics protocol with Unicode placeholder support). On any other terminal, or when stdout is not a TTY, kitty-player prints a notice and exits without drawing
-- ffmpeg is not required in v1 (there is nothing to decode yet, see below)
+- ffmpeg is bundled (via ffmpeg-static and ffprobe-static), no system install needed
 
 ## Install and run
 
 ```sh
 npx kitty-player
+npx kitty-player movie.mp4
 ```
 
 Or install globally:
@@ -30,7 +31,10 @@ pnpm dev
 
 ## Current status
 
-v1 plays a built-in procedural demo clip, a hue-cycling ball moving on a Lissajous path over a 20 second loop. Real video file decoding is the planned next step, slotting in behind the existing `FrameSource` interface. Passing a file argument today prints an error and exits. What ships now is the player scaffolding (Ink UI, playback clock, seeking, pause, resize handling) with a synthetic source standing in for the decoder.
+kitty-player plays video files (`kitty-player movie.mp4`) through a bundled ffmpeg,
+decoded as a stream at a capped resolution with seek and pause. Audio is not
+played yet. Running with no arguments plays the built-in procedural demo clip,
+a hue-cycling ball moving on a Lissajous path over a 20 second loop.
 
 ## Controls
 
@@ -57,7 +61,7 @@ v1 plays a built-in procedural demo clip, a hue-cycling ball moving on a Lissajo
 
 ## Library use
 
-The package also exports the pieces for embedding a player panel in your own Ink app: `Player`, the `FrameSource`/`FrameSourceInfo` contract, `createProceduralSource`, `computePanelRegion`, and `formatTime`.
+The package also exports the pieces for embedding a player panel in your own Ink app: `Player`, the `FrameSource`/`FrameSourceInfo` contract, `createProceduralSource`, `createFfmpegSource`, `computePanelRegion`, and `formatTime`.
 
 ```tsx
 import { render } from 'ink';
@@ -91,7 +95,7 @@ const screen = await createScreen({
 render(<Player screen={screen} source={source} info={info} />, { exitOnCtrlC: false });
 ```
 
-`FrameSource` is the seam a real decoder implements. `open()` returns the stream info (pixel dimensions, color space, duration, frame rate). `getFrameAt(timeMs)` resolves the frame at or nearest after that timestamp, or `null` to keep the last frame on screen, and the returned buffer is only valid until the next call because sources may reuse it. `seek(timeMs)` repositions the source so nearby `getFrameAt` calls are cheap (a no-op for random-access sources). `close()` releases decoder resources and is idempotent. Implement those four methods over an ffmpeg pipe and the player plays real video.
+`FrameSource` is the seam a real decoder implements. `open()` returns the stream info (pixel dimensions, color space, duration, frame rate). `getFrameAt(timeMs)` resolves the frame at or nearest after that timestamp, or `null` to keep the last frame on screen, and the returned buffer is only valid until the next call because sources may reuse it. `seek(timeMs)` repositions the source so nearby `getFrameAt` calls are cheap (a no-op for random-access sources). `close()` releases decoder resources and is idempotent. `createFfmpegSource` implements those four methods over a bundled ffmpeg pipe, and is the FrameSource behind file playback.
 
 ## License
 

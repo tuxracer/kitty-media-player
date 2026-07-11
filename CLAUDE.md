@@ -11,11 +11,11 @@
 
 ## Architecture
 
-Data flow: `cli` parses argv (`parseCliArgs`, a pure function in its own file so tests can import it without executing the entry) and guards on terminal capability. If stdout is not a TTY or `detectKittyUnicodePlaceholderSupport()` says no, it prints a notice and exits 0 (CI-friendly). Otherwise it opens the `FrameSource` (the built-in `proceduralSource` in v1), computes the panel `region` with `computePanelRegion`, and awaits kitty-motion's `createScreen` BEFORE calling Ink's `render()`. That ordering is load-bearing because the capability probes read responses from stdin, and Ink's `useInput` takes stdin over once rendering starts. Then it renders `<Player screen source info />` with `exitOnCtrlC: false` so the Player's own input handler can dispose the Screen and close the source before Ink tears down.
+Data flow: `cli` parses argv (`parseCliArgs`, a pure function in its own file so tests can import it without executing the entry) and guards on terminal capability. If stdout is not a TTY or `detectKittyUnicodePlaceholderSupport()` says no, it prints a notice and exits 0 (CI-friendly). Otherwise it opens the `FrameSource` (`ffmpegSource` when a file argument is given, the built-in `proceduralSource` otherwise), computes the panel `region` with `computePanelRegion`, and awaits kitty-motion's `createScreen` BEFORE calling Ink's `render()`. That ordering is load-bearing because the capability probes read responses from stdin, and Ink's `useInput` takes stdin over once rendering starts. Then it renders `<Player screen source info />` with `exitOnCtrlC: false` so the Player's own input handler can dispose the Screen and close the source before Ink tears down.
 
 `Player` owns the playback clock. A `setInterval` at the source frame rate lives outside React state, refs mirror `playing` and elapsed time as the source of truth for the interval callback, and an in-flight guard keeps async `getFrameAt` calls from piling up behind a slow source. Frames go straight to `screen.pushFrame()`, bypassing React entirely, and React state (so an Ink redraw) updates only when the displayed whole second changes. On terminal resize the Player debounces the stdout `resize` event, calls `screen.setRegion()` with a freshly computed panel region, RE-READS `screen.getPlaceholderRows()` (the grid size can change, so the old rows are stale), and repaints the current frame.
 
-`FrameSource` is the seam where a future ffmpeg decoder plugs in. It is a pull model: the player's clock requests frames by timestamp via `getFrameAt(timeMs)`, `null` means no frame is ready and the player keeps showing the last one, and returned buffers may be reused by the source (valid only until the next call). `seek(timeMs)` makes nearby reads cheap, `close()` is idempotent.
+`FrameSource` is the seam the ffmpeg decoder plugs into. It is a pull model: the player's clock requests frames by timestamp via `getFrameAt(timeMs)`, `null` means no frame is ready and the player keeps showing the last one, and returned buffers may be reused by the source (valid only until the next call). `seek(timeMs)` makes nearby reads cheap, `close()` is idempotent.
 
 ### Module map
 
@@ -23,6 +23,7 @@ Data flow: `cli` parses argv (`parseCliArgs`, a pure function in its own file so
 - `src/Player/` - the Ink component: playback clock, keyboard input, progress bar chrome, resize handling
 - `src/frameSource/` - interface-only module holding the `FrameSource`/`FrameSourceInfo` contract (no implementation, no consts)
 - `src/proceduralSource/` - the built-in demo source, a hue-cycling ball on a Lissajous path rendered as a pure function of time into a reused framebuffer
+- `src/ffmpegSource/` - decodes video files with bundled ffmpeg-static/ffprobe-static: ffprobe metadata probe, one streaming ffmpeg process decoding rawvideo rgb24 into a readahead queue (stream pause/resume backpressure), respawned with input-side `-ss` on seek or backward time jump, frames scaled to fit 960x540
 - `src/playerLayout/` - `computePanelRegion`, sizes the video panel's cell grid from the terminal size via kitty-motion's `fitToTerminal`
 - `src/formatTime/` - millisecond timestamps as `m:ss`, switching to `h:mm:ss` at one hour
 - `src/index.ts` - library entry with explicit (not star) re-exports, because several modules define their own `MS_PER_SECOND` and star exports would silently drop the ambiguous name
@@ -35,6 +36,7 @@ Data flow: `cli` parses argv (`parseCliArgs`, a pure function in its own file so
 - **AGENTS.md is a symlink to CLAUDE.md**: edit CLAUDE.md only, never create a separate AGENTS.md
 - **ink is pinned to 5.x with react 18**: `@inkjs/ui` 2.x targets ink 5, and Ink's width measurement of the placeholder cells is version-sensitive. ink 7 requires react 19 and is a deliberate future upgrade, not a casual dependency bump
 - **`VERSION` in `src/cli/consts.ts` mirrors package.json**: it is a literal (importing package.json from outside `src/` breaks the tsconfig include), so bump it together with the `version` field on every release
+- **ffmpeg-static needs its install script**: `pnpm-workspace.yaml` allowlists `ffmpeg-static` under `allowBuilds` because it downloads its binary in a postinstall step. If the CLI dies with ENOENT spawning ffmpeg, the script was blocked, run `pnpm install --force` after checking the allowlist
 
 ## Git
 

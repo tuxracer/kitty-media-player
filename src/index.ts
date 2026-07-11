@@ -38,3 +38,7 @@ export {
 } from './playerLayout/index.ts';
 
 export { formatTime } from './formatTime/index.ts';
+
+export { FfmpegSourceError, createFfmpegSource, isFfmpegSourceError } from './ffmpegSource/index.ts';
+export type { FfmpegSourceErrorCode, FfmpegSourceOptions } from './ffmpegSource/index.ts';
+export { MAX_DECODE_HEIGHT, MAX_DECODE_WIDTH, computeDecodeSize } from './ffmpegSource/index.ts';
