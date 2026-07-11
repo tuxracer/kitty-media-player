@@ -78,7 +78,7 @@ const App = () => {
   const video = useRef<VideoRef>(null);
 
   useInput((input) => {
-    if (input === " ") {
+    if (input === ' ') {
       if (video.current?.paused) {
         void video.current.play();
       } else {

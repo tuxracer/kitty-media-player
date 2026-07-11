@@ -24,7 +24,7 @@ Data flow: `cli` parses argv (`parseCliArgs`, a pure function in its own file so
 - `src/frameSource/` - interface-only module holding the `FrameSource`/`FrameSourceInfo` contract (no implementation, no consts)
 - `src/proceduralSource/` - the built-in demo source, a hue-cycling ball on a Lissajous path rendered as a pure function of time into a reused framebuffer
 - `src/ffmpegSource/` - decodes video files with bundled ffmpeg-static/ffprobe-static: ffprobe metadata probe, one streaming ffmpeg process decoding rawvideo rgb24 into a readahead queue (stream pause/resume backpressure), respawned with input-side `-ss` on seek or backward time jump, frames scaled to fit 960x540
-- `src/playerLayout/` - `computePanelRegion`, sizes the video panel's cell grid from the terminal size via kitty-motion's `fitToTerminal`
+- `src/playerLayout/` - `computePanelRegion` sizes the video panel's cell grid from the terminal size via kitty-motion's `fitToTerminal`, and `computeEmbeddedRegion` letterboxes a source frame into a fixed cell box for embedded mode (deliberately not via `fitToTerminal`, whose minimum-display floor distorts small boxes)
 - `src/formatTime/` - millisecond timestamps as `m:ss`, switching to `h:mm:ss` at one hour
 - `src/index.ts` - library entry with explicit (not star) re-exports, because several modules define their own `MS_PER_SECOND` and star exports would silently drop the ambiguous name
 

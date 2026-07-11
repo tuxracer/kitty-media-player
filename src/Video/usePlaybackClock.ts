@@ -153,7 +153,7 @@ export const usePlaybackClock = ({
       // showFrameAt's .then) so a host reading elapsed state inside onEnded
       // sees the playhead at the end, matching HTML5's currentTime ===
       // duration guarantee in the ended event. showFrameAt's .then still
-      // runs for the final frame paint; it sees no second-crossing since
+      // runs for the final frame paint. It sees no second-crossing since
       // elapsedRef is already at durationMs, which is fine.
       showFrameAt(info.durationMs);
       elapsedRef.current = info.durationMs;
