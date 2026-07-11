@@ -52,3 +52,10 @@ export const FALLBACK_REASON_MESSAGES: Record<FallbackReason, string> = {
   'multiplexed-session':
     'tmux or GNU screen is intercepting the kitty graphics escape sequences',
 };
+
+/** The [y/N] question printed after the fallback warning lines */
+export const FALLBACK_PROMPT =
+  'Continue in half-block mode (reduced quality, no on-screen UI)? [y/N] ';
+
+/** Answers that accept the half-block prompt, compared trimmed and lowercased */
+export const FALLBACK_YES_ANSWERS: readonly string[] = ['y', 'yes'];

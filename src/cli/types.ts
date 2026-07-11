@@ -29,3 +29,11 @@ export type ParsedCliArgs = PlayAction | HelpAction | VersionAction | UsageError
 
 /** Why the kitty-graphics player cannot run in this terminal */
 export type FallbackReason = 'no-placeholder-support' | 'multiplexed-session';
+
+/** Streams for the half-block confirmation prompt (stdin/stderr in production) */
+export interface ConfirmFallbackOptions {
+  /** Where the answer line is read from */
+  input: NodeJS.ReadableStream;
+  /** Where the prompt text is written */
+  output: NodeJS.WritableStream;
+}

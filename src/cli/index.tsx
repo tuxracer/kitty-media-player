@@ -19,6 +19,7 @@ import { parseCliArgs } from './parseCliArgs.ts';
 
 export { parseCliArgs } from './parseCliArgs.ts';
 export { detectFallbackReasons } from './detectFallbackReasons.ts';
+export { confirmFallback } from './confirmFallback.ts';
 export * from './consts.ts';
 export * from './types.ts';
 

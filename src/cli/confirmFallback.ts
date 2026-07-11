@@ -1,0 +1,28 @@
+import { createInterface } from 'node:readline';
+
+import { FALLBACK_PROMPT, FALLBACK_YES_ANSWERS } from './consts.ts';
+import type { ConfirmFallbackOptions } from './types.ts';
+
+/**
+ * Ask whether to continue in half-block mode. Writes the prompt to output
+ * (stderr in production, keeping stdout clean for the renderer) and reads one
+ * line from input in cooked mode. Resolves true only for a y/yes answer.
+ * Anything else, an empty line, or EOF resolves false. Runs before any
+ * Screen or Ink render exists, so it owns stdin briefly and releases it.
+ */
+export const confirmFallback = ({ input, output }: ConfirmFallbackOptions): Promise<boolean> =>
+  new Promise((resolve) => {
+    const readline = createInterface({ input, terminal: false });
+    output.write(FALLBACK_PROMPT);
+    let answered = false;
+    readline.once('line', (line) => {
+      answered = true;
+      readline.close();
+      resolve(FALLBACK_YES_ANSWERS.includes(line.trim().toLowerCase()));
+    });
+    readline.once('close', () => {
+      if (!answered) {
+        resolve(false);
+      }
+    });
+  });

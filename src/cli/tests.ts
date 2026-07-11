@@ -1,9 +1,13 @@
+import { PassThrough } from 'node:stream';
+
 import { describe, expect, it } from 'vitest';
 
 // Import from parseCliArgs.ts directly (not ./index.tsx) because importing
 // the entry module would run the CLI at module top level.
 import { parseCliArgs } from './parseCliArgs.ts';
 import { detectFallbackReasons } from './detectFallbackReasons.ts';
+import { confirmFallback } from './confirmFallback.ts';
+import { FALLBACK_PROMPT } from './consts.ts';
 
 describe('parseCliArgs', () => {
   it('returns play when no arguments are given', () => {
@@ -99,5 +103,42 @@ describe('detectFallbackReasons', () => {
     const reasons = detectFallbackReasons({ TERM: 'screen-256color', STY: '1234.pts-0.host' });
     expect(reasons).toContain('no-placeholder-support');
     expect(reasons).toContain('multiplexed-session');
+  });
+});
+
+describe('confirmFallback', () => {
+  /** Run confirmFallback against fake streams, feeding one answer line (or EOF when undefined) */
+  const ask = async (answer?: string): Promise<{ accepted: boolean; prompted: string }> => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const pending = confirmFallback({ input, output });
+    if (answer === undefined) {
+      input.end();
+    } else {
+      input.write(answer);
+    }
+    const accepted = await pending;
+    const prompted = String(output.read() ?? '');
+    return { accepted, prompted };
+  };
+
+  it('writes the prompt to the output stream', async () => {
+    const { prompted } = await ask('n\n');
+    expect(prompted).toBe(FALLBACK_PROMPT);
+  });
+
+  it.each(['y\n', 'Y\n', 'yes\n', ' YES \n'])('accepts %j', async (answer) => {
+    const { accepted } = await ask(answer);
+    expect(accepted).toBe(true);
+  });
+
+  it.each(['n\n', 'no\n', '\n', 'yep\n'])('declines %j', async (answer) => {
+    const { accepted } = await ask(answer);
+    expect(accepted).toBe(false);
+  });
+
+  it('declines on EOF without an answer', async () => {
+    const { accepted } = await ask(undefined);
+    expect(accepted).toBe(false);
   });
 });
