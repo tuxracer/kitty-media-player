@@ -552,7 +552,8 @@ describe('createFfmpegAudioPlayer playback', () => {
       player.playFrom(500);
       await waitFor(() => fake.written.length >= 3);
       fake.playFrames(1);
-      expect(player.getPositionMs()).toBeGreaterThanOrEqual(500);
+      const frameMs = (FAKE_FRAME_SIZE / SAMPLE_RATE) * 1_000;
+      expect(player.getPositionMs()).toBeCloseTo(500 + frameMs, 5);
     } finally {
       await player.close();
       server.closeAllConnections();
@@ -560,6 +561,36 @@ describe('createFfmpegAudioPlayer playback', () => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
       });
     }
+  });
+
+  it('reports isStarting only between playFrom and the first played frame', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    expect(player.isStarting()).toBe(false);
+    player.playFrom(0);
+    expect(player.isStarting()).toBe(true);
+    await waitFor(() => fake.written.length >= 1);
+    // PCM is queued but nothing has played yet
+    expect(player.isStarting()).toBe(true);
+    fake.playFrames(1);
+    expect(player.isStarting()).toBe(false);
+    player.pause();
+    expect(player.isStarting()).toBe(false);
+    await player.close();
+  });
+
+  it('stops counting as starting when the decoder exits without sound', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    // Far past the 2 s track: ffmpeg exits cleanly with no output. The dead
+    // attempt must release the clock's buffering gate instead of stalling
+    // it, so it stops counting as starting.
+    player.playFrom(60_000);
+    await waitFor(() => !player.isStarting());
+    expect(fake.written.length).toBe(0);
+    await player.close();
   });
 
   it('playFrom while playing restarts cleanly from the new offset', async () => {
@@ -574,9 +605,8 @@ describe('createFfmpegAudioPlayer playback', () => {
     const writtenBefore = fake.written.length;
     await waitFor(() => fake.written.length > writtenBefore);
     fake.playFrames(1);
-    // At least the offset (plus the learned startup latency and the one
-    // played frame, both machine-dependent)
-    expect(player.getPositionMs()).toBeGreaterThanOrEqual(1_000);
+    const frameMs = (FAKE_FRAME_SIZE / SAMPLE_RATE) * 1_000;
+    expect(player.getPositionMs()).toBeCloseTo(1_000 + frameMs, 5);
     await player.close();
   });
 

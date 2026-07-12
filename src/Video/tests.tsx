@@ -107,6 +107,8 @@ interface FakeAudioHarness {
   mutedValues: boolean[];
   closeCalls: number;
   positionMs: number | null;
+  /** True simulates a decoder still spinning up after playFrom (no sound yet) */
+  starting: boolean;
 }
 
 const createFakeAudio = (): FakeAudioHarness => {
@@ -116,6 +118,7 @@ const createFakeAudio = (): FakeAudioHarness => {
     mutedValues: [],
     closeCalls: 0,
     positionMs: null,
+    starting: false,
     audio: {
       open: () => Promise.resolve({ hasAudio: true }),
       playFrom: (timeMs) => {
@@ -127,6 +130,7 @@ const createFakeAudio = (): FakeAudioHarness => {
       setMuted: (muted) => {
         harness.mutedValues.push(muted);
       },
+      isStarting: () => harness.starting,
       getPositionMs: () => harness.positionMs,
       close: () => {
         harness.closeCalls += 1;
@@ -929,6 +933,38 @@ describe('Video buffering gate', () => {
     expect(audio.playFroms[0]).toBe(0);
     expect(ref.current?.currentTime).toBeGreaterThan(0);
     expect(harness.pushedFrames.length).toBeGreaterThan(0);
+    unmount();
+  });
+
+  it('keeps holding after the first frame until audio makes sound', async () => {
+    const { harness, source, info } = await setup();
+    const audio = createFakeAudio();
+    audio.starting = true;
+    const ref = createRef<VideoRef>();
+    const { unmount } = render(
+      <Video
+        ref={ref}
+        screen={harness.screen}
+        source={source}
+        info={info}
+        audio={audio.audio}
+        autoPlay
+      />,
+    );
+    await delay(150);
+    await flush();
+    // The frame painted and audio was started once, but no sound has come
+    // out yet: the clock holds so picture and sound begin together
+    expect(audio.playFroms).toEqual([0]);
+    expect(ref.current?.currentTime).toBe(0);
+    expect(harness.pushedFrames.length).toBeGreaterThan(0);
+
+    audio.starting = false;
+    await delay(150);
+    await flush();
+    expect(ref.current?.currentTime).toBeGreaterThan(0);
+    // The hold started audio exactly once, no snap fired
+    expect(audio.playFroms).toEqual([0]);
     unmount();
   });
 

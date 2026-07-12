@@ -38,14 +38,13 @@ export { createRtAudioDevice } from './rtAudioDevice.ts';
  * player plays silent video.
  *
  * A decoder takes time to produce its first sound (near zero for local
- * files, seconds for remote streams), and the video clock keeps running
- * through it. Two measures keep that startup from breaking sync. Until the
- * current decoder's sound actually plays, getPositionMs reports null, so
- * the clock's drift snap leaves a starting decoder alone instead of
- * killing it every second (which silenced remote playback entirely). And
- * playFrom aims past the requested time by the last measured
- * spawn-to-first-sound latency, so when the sound arrives it lands where
- * the clock has advanced to instead of permanently behind it.
+ * files, seconds for remote streams). The clock waits it out: every audio
+ * start goes through the clock's buffering gate, which holds playback
+ * while isStarting reports a live decode attempt with no sound out yet
+ * and releases when sound plays or the attempt dies. Until then
+ * getPositionMs reports null, so the drift snap leaves a starting decoder
+ * alone instead of killing it every second (which silenced remote
+ * playback entirely).
  */
 export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): AudioPlayer => {
   const {
@@ -74,10 +73,6 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
   // position. Both reset on every playFrom and pause.
   let framesWritten = 0;
   let framesPlayed = 0;
-
-  // Wall-clock time the last decoder took from spawn to its first PCM,
-  // learned per spawn. playFrom aims past its target by this much.
-  let startLatencyMs = 0;
 
   const frameBytes = (activeDevice: AudioDevice): number =>
     activeDevice.frameSize * CHANNELS * BYTES_PER_SAMPLE;
@@ -138,10 +133,8 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
 
-    const current: AudioDecoder = { startMs, killed: false, ended: false, child };
+    const current: AudioDecoder = { startMs, killed: false, ended: false, exited: false, child };
     const bytes = frameBytes(activeDevice);
-    const spawnedAtMs = Date.now();
-    let firstPcmSeen = false;
 
     // Chunks accumulate until at least one whole device frame arrived, then
     // a single concat slices out every complete frame, the same batching the
@@ -154,10 +147,6 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     child.stdout.on('data', (chunk: Buffer) => {
       if (current.killed) {
         return;
-      }
-      if (!firstPcmSeen) {
-        firstPcmSeen = true;
-        startLatencyMs = Date.now() - spawnedAtMs;
       }
       pendingChunks.push(chunk);
       pendingBytes += chunk.length;
@@ -195,8 +184,12 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
       );
     };
 
-    child.on('error', noteFailure);
+    child.on('error', () => {
+      current.exited = true;
+      noteFailure();
+    });
     child.on('close', (code, signal) => {
+      current.exited = true;
       if (code !== 0 || signal !== null) {
         noteFailure();
       } else if (!current.killed) {
@@ -254,12 +247,7 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     device.clearQueue();
     framesWritten = 0;
     framesPlayed = 0;
-    // Aim past the target by the learned startup latency: the clock keeps
-    // running while the decoder spins up, so by the time sound comes out
-    // the playhead is about startLatencyMs past timeMs. Aiming at timeMs
-    // itself would start the audio permanently behind, and the drift snap
-    // would respawn it forever chasing a gap that never closes.
-    decoder = spawnDecoder(timeMs + startLatencyMs, device);
+    decoder = spawnDecoder(timeMs, device);
   };
 
   const pause = (): void => {
@@ -278,6 +266,14 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
       device.setVolume(muted ? VOLUME_MUTED : VOLUME_FULL);
     }
   };
+
+  const isStarting = (): boolean =>
+    // A live decode attempt that has produced no sound yet. Once the
+    // process exits (clean end past the track, crash) it can never
+    // produce sound, so it stops counting as starting even with nothing
+    // played, which releases the clock's buffering gate instead of
+    // stalling it on an audio attempt that is already dead.
+    !closed && decoder !== null && !decoder.exited && framesPlayed === 0;
 
   const getPositionMs = (): number | null => {
     if (closed || device === null || decoder === null) {
@@ -307,5 +303,5 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     return Promise.resolve();
   };
 
-  return { open, playFrom, pause, setMuted, getPositionMs, close };
+  return { open, playFrom, pause, setMuted, isStarting, getPositionMs, close };
 };

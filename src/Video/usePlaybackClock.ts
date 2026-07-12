@@ -13,12 +13,14 @@ import type { PlaybackClock, PlaybackClockOptions } from './types.ts';
  * source opens), in which case the clock idles.
  *
  * A buffering gate holds the clock at startup, after seeks, loop wraps, and
- * replays: the playhead does not advance (and audio does not start) until
- * the source delivers the frame at the gated position. Remote URLs take
- * seconds to produce their first frame, and without the gate the bar runs
- * ahead and the skipped content is never shown. Once playback is underway a
- * null frame still advances the clock (frames drop, playback stays
- * realtime).
+ * replays: the playhead does not advance until the source delivers the
+ * frame at the gated position, and then keeps holding until the audio
+ * started there has made sound or reported it cannot (isStarting), so
+ * picture and sound begin together. Remote URLs take seconds to produce
+ * their first frame and their first audio, and without the gate the bar
+ * runs ahead and the skipped content is never shown. Once playback is
+ * underway a null frame still advances the clock (frames drop, playback
+ * stays realtime).
  */
 export const usePlaybackClock = ({
   screen,
@@ -66,11 +68,18 @@ export const usePlaybackClock = ({
   // timestamp back into elapsedRef and clobber the reset.
   const timelineRef = useRef(0);
 
-  // The buffering gate. True until the source delivers the frame at the
-  // current playhead: at startup, after seeks, loop wraps, replays, and
-  // source changes. While gated the interval retries the same position
-  // instead of advancing, and audio starts only when the gate clears.
+  // The buffering gate, two phases. Armed at startup, seeks, loop wraps,
+  // replays, and source changes. While armed the interval retries the same
+  // position instead of advancing. Phase one waits for the source to
+  // deliver the frame at the playhead. Phase two starts audio there and
+  // keeps holding until the audio has made sound or reported it cannot
+  // (isStarting), so picture and sound begin together.
   const waitingRef = useRef(true);
+
+  // Whether the currently armed gate has already issued its audio start.
+  // Reset whenever the gate re-arms or audio is paused, so every hold
+  // starts audio exactly once.
+  const audioStartedRef = useRef(false);
 
   const noteSourceError = useCallback(
     (error: unknown): void => {
@@ -111,12 +120,18 @@ export const usePlaybackClock = ({
               // Still buffering: hold the playhead until the frame lands
               return;
             }
-            waitingRef.current = false;
-            // Audio was deferred while the gate held, start it at the
-            // position the picture actually resumed from
-            if (readPlaying()) {
+            // The picture is ready. Start audio at the position the
+            // picture resumed from (once per hold), then keep holding
+            // until it makes sound or reports it cannot, so playback
+            // begins with both together.
+            if (!audioStartedRef.current && readPlaying()) {
+              audioStartedRef.current = true;
               audioRef.current?.playFrom(nextMs);
             }
+            if (readPlaying() && (audioRef.current?.isStarting() ?? false)) {
+              return;
+            }
+            waitingRef.current = false;
           }
           const previousSecond = Math.floor(elapsedRef.current / MS_PER_SECOND);
           const nextSecond = Math.floor(nextMs / MS_PER_SECOND);
@@ -128,15 +143,19 @@ export const usePlaybackClock = ({
               duration: info.durationMs / MS_PER_SECOND,
             });
             // Drift snap: the video clock silently stalls when a slow
-            // source trips the in-flight guard, so audio can run ahead.
-            // Once per displayed second is enough correction.
+            // source trips the in-flight guard, so audio can drift away.
+            // Once per displayed second is enough correction. The resync
+            // goes through the gate (the next tick restarts audio at the
+            // playhead and holds until it is audible), so a slow-starting
+            // decoder is never respawned into a chase it cannot win.
             const audioPositionMs = audioRef.current?.getPositionMs() ?? null;
             if (
               audioPositionMs !== null &&
               playingRef.current &&
               Math.abs(audioPositionMs - nextMs) > DRIFT_RESYNC_THRESHOLD_MS
             ) {
-              audioRef.current?.playFrom(nextMs);
+              waitingRef.current = true;
+              audioStartedRef.current = false;
             }
           }
         })
@@ -159,6 +178,9 @@ export const usePlaybackClock = ({
     // (e.g. call play()), and then audio must not be silenced afterward.
     if (!readPlaying()) {
       audioRef.current?.pause();
+      // A held gate must issue a fresh audio start on resume, the paused
+      // one was killed
+      audioStartedRef.current = false;
     }
   }, [readPlaying]);
 
@@ -173,6 +195,7 @@ export const usePlaybackClock = ({
       setEnded(false);
       timelineRef.current += 1;
       waitingRef.current = true;
+      audioStartedRef.current = false;
       elapsedRef.current = 0;
       setElapsedMs(0);
     }
@@ -183,12 +206,16 @@ export const usePlaybackClock = ({
     setPlaying(true);
     callbacksRef.current.onPlay?.();
     // Re-check: an onPlay handler may synchronously re-enter the clock
-    // (e.g. call pause()), and then audio must not start afterward. While
-    // the gate holds, the gate-clear owns the audio start instead.
+    // (e.g. call pause()), and then audio must not start afterward.
+    // Resume goes through the gate like every other start: hold until the
+    // audio restarted at the playhead is audible, kicked immediately so a
+    // local resume clears within a frame fetch instead of a full tick.
     if (readPlaying() && !waitingRef.current) {
-      audioRef.current?.playFrom(elapsedRef.current);
+      waitingRef.current = true;
+      audioStartedRef.current = false;
+      showFrameAt(elapsedRef.current);
     }
-  }, [readPlaying]);
+  }, [readPlaying, showFrameAt]);
 
   const togglePlay = useCallback((): void => {
     if (playingRef.current) {
@@ -210,6 +237,7 @@ export const usePlaybackClock = ({
       }
       timelineRef.current += 1;
       waitingRef.current = true;
+      audioStartedRef.current = false;
       const previousSecond = Math.floor(elapsedRef.current / MS_PER_SECOND);
       const nextSecond = Math.floor(targetMs / MS_PER_SECOND);
       elapsedRef.current = targetMs;
@@ -229,6 +257,7 @@ export const usePlaybackClock = ({
   useEffect(() => {
     timelineRef.current += 1;
     waitingRef.current = true;
+    audioStartedRef.current = false;
     elapsedRef.current = 0;
     setElapsedMs(0);
     endedRef.current = false;
@@ -241,12 +270,14 @@ export const usePlaybackClock = ({
     if (screen === null || source === null || info === null) {
       return;
     }
-    showFrameAt(elapsedRef.current);
-    // On a mid-playback effect re-run audio restarts right away. Behind the
-    // gate (startup, source change) the gate-clear starts it instead.
+    // A mid-playback effect re-run (the cleanup paused audio) restarts
+    // audio through the gate like every other start. At mount and after
+    // source changes the gate is already armed.
     if (playingRef.current && !waitingRef.current) {
-      audioRef.current?.playFrom(elapsedRef.current);
+      waitingRef.current = true;
+      audioStartedRef.current = false;
     }
+    showFrameAt(elapsedRef.current);
     const intervalMs = Math.round(MS_PER_SECOND / info.fps);
     const interval = setInterval(() => {
       if (!playingRef.current || !screen.isWritable() || inFlightRef.current) {

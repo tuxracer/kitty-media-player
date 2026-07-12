@@ -103,6 +103,8 @@ interface FakeAudioHarness {
   mutedValues: boolean[];
   closeCalls: number;
   positionMs: number | null;
+  /** True simulates a decoder still spinning up after playFrom (no sound yet) */
+  starting: boolean;
 }
 
 const createFakeAudio = (): FakeAudioHarness => {
@@ -112,6 +114,7 @@ const createFakeAudio = (): FakeAudioHarness => {
     mutedValues: [],
     closeCalls: 0,
     positionMs: null,
+    starting: false,
     audio: {
       open: () => Promise.resolve({ hasAudio: true }),
       playFrom: (timeMs) => {
@@ -123,6 +126,7 @@ const createFakeAudio = (): FakeAudioHarness => {
       setMuted: (muted) => {
         harness.mutedValues.push(muted);
       },
+      isStarting: () => harness.starting,
       getPositionMs: () => harness.positionMs,
       close: () => {
         harness.closeCalls += 1;
@@ -354,6 +358,22 @@ describe('runFallbackPlayer', () => {
     await done;
   });
 
+  it('keeps holding after the first frame until audio makes sound', async () => {
+    const audio = createFakeAudio();
+    audio.starting = true;
+    const state = setup(audio);
+    await vi.advanceTimersByTimeAsync(TICK_MS * 5);
+    // The frame painted and audio was started once, but no sound has come
+    // out yet: the clock holds at zero
+    expect(audio.playFroms).toEqual([0]);
+    expect(state.source.requestedMs.every((ms) => ms === 0)).toBe(true);
+    audio.starting = false;
+    await vi.advanceTimersByTimeAsync(TICK_MS * 2);
+    expect(state.source.requestedMs).toContain(TICK_MS);
+    expect(audio.playFroms).toEqual([0]);
+    await quit(state);
+  });
+
   it('clamps a forward seek at the stream duration', async () => {
     const state = setup();
     // Settle the initial frame fetch first, otherwise the first press's
@@ -404,6 +424,9 @@ describe('runFallbackPlayer audio', () => {
     expect(audio.pauseCalls).toBe(1);
     const playsBefore = audio.playFroms.length;
     state.keys.press(' ');
+    // Resume restarts audio through the gate, so the start lands when the
+    // kicked frame fetch resolves
+    await settleGate();
     expect(audio.playFroms.length).toBe(playsBefore + 1);
     await quit(state);
   });

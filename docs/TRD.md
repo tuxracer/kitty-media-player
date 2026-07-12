@@ -91,35 +91,37 @@ the video, so the picture participates in Ink layout like any other text.
 - React state (and therefore an Ink redraw) updates only when the displayed
   whole second changes. Ink redraws roughly once per second, for the time
   readout and progress bar.
-- A buffering gate holds the clock at startup, after seeks, loop wraps, and
-  replays. The playhead does not advance (and audio does not start) until
-  the source delivers the frame at the gated position, and the interval
-  retries that position each tick. Remote URLs take seconds to produce
-  their first frame, and without the gate the bar runs ahead while the
-  skipped content is never shown. Once playback is underway a null frame
-  still advances the clock, so frames drop and playback stays realtime.
-  Seeks and wraps move the playhead synchronously (the bar tracks the jump
-  immediately, HTML5-style) and bump a timeline counter so a frame fetch
-  from the old position cannot write its timestamp over the new one.
+- A two-phase buffering gate holds the clock at startup, after seeks, loop
+  wraps, replays, resumes, and drift resyncs, and the interval retries the
+  gated position each tick instead of advancing. Phase one waits for the
+  source to deliver the frame at the playhead. Phase two starts audio there
+  and keeps holding until the audio has made sound or reported it cannot
+  (`AudioPlayer.isStarting`), so picture, bar, and sound begin together.
+  Remote URLs take seconds to produce their first frame and their first
+  sound, and without the gate the bar runs ahead while the skipped content
+  is never shown. Once playback is underway a null frame still advances the
+  clock, so frames drop and playback stays realtime. Seeks and wraps move
+  the playhead synchronously (the bar tracks the jump immediately,
+  HTML5-style) and bump a timeline counter so a frame fetch from the old
+  position cannot write its timestamp over the new one.
 
-The clock also drives an optional `AudioPlayer`. `playFrom` and `pause` fire
-at the same transitions as the video (play, pause, seek, loop wrap), with
-seek, wrap, and startup restarts deferred through the buffering gate so the
-sound starts where the picture actually resumed. The
-video clock stays master. Once per displayed second it compares the audio
-player's reported position against its own elapsed time and calls `playFrom`
-again if they have drifted more than `DRIFT_RESYNC_THRESHOLD_MS` (250 ms)
-apart. A null position means the player has nothing audible to report (not
+The clock also drives an optional `AudioPlayer`. Every audio start
+(startup, seek, wrap, replay, resume) goes through the buffering gate, so
+`playFrom` always targets exactly the held playhead and the two streams
+release together. The video clock stays master. Once per displayed second
+it compares the audio player's reported position against its own elapsed
+time, and a drift beyond `DRIFT_RESYNC_THRESHOLD_MS` (250 ms) re-arms the
+gate, which restarts audio at the playhead and holds until it is audible
+again. A null position means the player has nothing audible to report (not
 playing, drained, or a fresh decoder that has produced no sound yet) and
 the clock leaves it alone. That last case matters for remote streams: a
 decoder can take seconds to deliver its first sample, and snapping during
 that window would kill and respawn it every second, forever, playing
-nothing. The ffmpeg player also aims each `playFrom` past the requested
-time by its last measured spawn-to-first-sound latency, so when the sound
-arrives it lands where the running clock is instead of permanently behind
-it. Audio problems never interrupt playback. A missing audio track, a
-missing output device, or a decoder crash all degrade to silent video
-instead of an error.
+nothing. A dead decode attempt (crash, or a seek past the end of the audio
+track) stops counting as starting, so it releases the gate instead of
+stalling it. Audio problems never interrupt playback. A missing audio
+track, a missing output device, or a decoder crash all degrade to silent
+video instead of an error.
 
 ### Resize handling
 

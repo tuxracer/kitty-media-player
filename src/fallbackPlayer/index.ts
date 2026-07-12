@@ -106,10 +106,13 @@ export const runFallbackPlayer = ({
     let audioMuted = muted;
     let lastDriftSecond = 0;
     // The buffering gate and its timeline, mirroring usePlaybackClock: the
-    // playhead holds (and audio stays silent) until the source delivers the
-    // frame at the gated position, and a bumped timeline keeps a fetch from
-    // before a seek from writing its timestamp over the new position.
+    // playhead holds until the source delivers the frame at the gated
+    // position and the audio started there has made sound or reported it
+    // cannot, so picture and sound begin together. A bumped timeline keeps
+    // a fetch from before a seek from writing its timestamp over the new
+    // position, and audioStarted makes each hold start audio exactly once.
     let waiting = true;
+    let audioStarted = false;
     let timeline = 0;
     const intervalMs = Math.round(MS_PER_SECOND / info.fps);
     audio?.setMuted(audioMuted);
@@ -142,12 +145,17 @@ export const runFallbackPlayer = ({
               // Still buffering: hold the playhead until the frame lands
               return;
             }
-            waiting = false;
-            // Audio was deferred while the gate held, start it at the
-            // position the picture actually resumed from
-            if (playing) {
+            // The picture is ready. Start audio at the position the
+            // picture resumed from (once per hold), then keep holding
+            // until it makes sound or reports it cannot.
+            if (!audioStarted && playing) {
+              audioStarted = true;
               audio?.playFrom(nextMs);
             }
+            if (playing && (audio?.isStarting() ?? false)) {
+              return;
+            }
+            waiting = false;
           }
           elapsedMs = nextMs;
         })
@@ -163,6 +171,7 @@ export const runFallbackPlayer = ({
     const movePlayheadTo = (targetMs: number): void => {
       timeline += 1;
       waiting = true;
+      audioStarted = false;
       elapsedMs = targetMs;
     };
 
@@ -193,15 +202,18 @@ export const runFallbackPlayer = ({
       if (nextMs < info.durationMs) {
         // Drift snap once per whole second, on non-wrap ticks only, so a
         // wrap tick never fires a redundant snap right before its own
-        // playFrom. usePlaybackClock avoids the same double-fire because
-        // its snap lives in the async frame callback, after the wrap's
-        // playFrom has already restarted the audio position.
+        // restart. The resync goes through the gate (hold at the playhead,
+        // restart audio there, release when audible), so a slow-starting
+        // decoder is never respawned into a chase it cannot win.
         const second = Math.floor(elapsedMs / MS_PER_SECOND);
         if (second !== lastDriftSecond) {
           lastDriftSecond = second;
           const audioPositionMs = audio?.getPositionMs() ?? null;
           if (audioPositionMs !== null && Math.abs(audioPositionMs - elapsedMs) > DRIFT_RESYNC_THRESHOLD_MS) {
-            audio?.playFrom(elapsedMs);
+            waiting = true;
+            audioStarted = false;
+            showFrameAt(elapsedMs);
+            return;
           }
         }
         showFrameAt(nextMs);
@@ -257,12 +269,21 @@ export const runFallbackPlayer = ({
         if (key === KEY_SPACE) {
           playing = !playing;
           if (playing) {
-            // While the gate holds, the gate-clear owns the audio start
+            // Resume goes through the gate like every other start: hold
+            // until the audio restarted at the playhead is audible,
+            // kicked immediately so a local resume clears within a frame
+            // fetch instead of a full tick. While the gate already holds,
+            // it owns the start.
             if (!waiting) {
-              audio?.playFrom(elapsedMs);
+              waiting = true;
+              audioStarted = false;
+              showFrameAt(elapsedMs);
             }
           } else {
             audio?.pause();
+            // A held gate must issue a fresh audio start on resume, the
+            // paused one was killed
+            audioStarted = false;
           }
         }
         if (key === KEY_MUTE) {
