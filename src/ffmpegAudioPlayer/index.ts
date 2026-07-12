@@ -1,13 +1,17 @@
+import { spawn } from 'node:child_process';
+
 import ffmpegPath from 'ffmpeg-static';
 
 import type { AudioPlayer, AudioPlayerInfo } from '../audioPlayer/index.ts';
 import {
   AUDIO_QUEUE_CAP_MS,
   AUDIO_UNAVAILABLE_MESSAGE,
+  BYTES_PER_SAMPLE,
   CHANNELS,
   DEVICE_FRAME_SIZE,
   MS_PER_SECOND,
   SAMPLE_RATE,
+  STDERR_TAIL_MAX_CHARS,
   VOLUME_FULL,
   VOLUME_MUTED,
 } from './consts.ts';
@@ -37,12 +41,22 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
   let decoder: AudioDecoder | null = null;
   let closed = false;
   let muted = false;
+  let decodeFailureNoted = false;
+
+  // Read through a function around the createDevice await below: TypeScript's
+  // control-flow narrowing does not model the concurrent close() call that
+  // can land during that await, so it otherwise infers the direct variable
+  // read as permanently false and eslint flags the recheck as dead code.
+  const isClosed = (): boolean => closed;
 
   // Feed accounting. framesWritten minus framesPlayed is the queued backlog,
   // which drives ffmpeg stdout backpressure. framesPlayed drives the audible
   // position. Both reset on every playFrom and pause.
   let framesWritten = 0;
   let framesPlayed = 0;
+
+  const frameBytes = (activeDevice: AudioDevice): number =>
+    activeDevice.frameSize * CHANNELS * BYTES_PER_SAMPLE;
 
   const frameDurationMs = (activeDevice: AudioDevice): number =>
     (activeDevice.frameSize / SAMPLE_RATE) * MS_PER_SECOND;
@@ -70,17 +84,107 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     }
   };
 
+  const spawnDecoder = (startMs: number, activeDevice: AudioDevice): AudioDecoder => {
+    // open() checked ffmpegPath before creating the device, and playFrom
+    // only runs with a device, so this cannot trigger. It satisfies the
+    // narrowing without a cast.
+    if (ffmpegPath === null) {
+      throw new Error('unreachable: ffmpeg path was checked in open()');
+    }
+    const child = spawn(
+      ffmpegPath,
+      [
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-ss', `${startMs / MS_PER_SECOND}`,
+        '-i', filePath,
+        '-vn',
+        '-sn',
+        '-f', 's16le',
+        '-ar', `${SAMPLE_RATE}`,
+        '-ac', `${CHANNELS}`,
+        'pipe:1',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+
+    const current: AudioDecoder = { startMs, killed: false, child };
+    const bytes = frameBytes(activeDevice);
+
+    // Chunks accumulate until at least one whole device frame arrived, then
+    // a single concat slices out every complete frame, the same batching the
+    // video decoder uses. A trailing partial frame at end of stream (under
+    // one frame, about 21 ms) is dropped.
+    let pendingChunks: Buffer[] = [];
+    let pendingBytes = 0;
+    let stderrTail = '';
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (current.killed) {
+        return;
+      }
+      pendingChunks.push(chunk);
+      pendingBytes += chunk.length;
+      if (pendingBytes < bytes) {
+        return;
+      }
+      const merged = pendingChunks.length === 1 ? pendingChunks[0] : Buffer.concat(pendingChunks);
+      let offset = 0;
+      while (merged.length - offset >= bytes) {
+        // audify copies the PCM into its native queue synchronously, so
+        // handing it a subarray view is safe
+        activeDevice.write(merged.subarray(offset, offset + bytes));
+        framesWritten += 1;
+        offset += bytes;
+      }
+      pendingChunks = offset < merged.length ? [merged.subarray(offset)] : [];
+      pendingBytes = merged.length - offset;
+      if (framesWritten - framesPlayed >= queueCapFrames(activeDevice)) {
+        child.stdout.pause();
+      }
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_MAX_CHARS);
+    });
+
+    const noteFailure = (): void => {
+      if (current.killed || closed || decodeFailureNoted) {
+        return;
+      }
+      decodeFailureNoted = true;
+      const detail = stderrTail.trim();
+      process.stderr.write(
+        `kitty-video-player: audio decode failed${detail === '' ? '' : `: ${detail}`}\n`,
+      );
+    };
+
+    child.on('error', noteFailure);
+    child.on('close', (code, signal) => {
+      if (code !== 0 || signal !== null) {
+        noteFailure();
+      }
+    });
+
+    return current;
+  };
+
   const open = async (): Promise<AudioPlayerInfo> => {
     const hasStream = await probeHasAudio(filePath);
     if (!hasStream || ffmpegPath === null || closed) {
       return { hasAudio: false };
     }
-    device = await createDevice({
+    const openedDevice = await createDevice({
       sampleRate: SAMPLE_RATE,
       channels: CHANNELS,
       frameSize: DEVICE_FRAME_SIZE,
       onFrameDone,
     });
+    if (isClosed()) {
+      openedDevice?.close();
+      return { hasAudio: false };
+    }
+    device = openedDevice;
     if (device === null) {
       process.stderr.write(`${AUDIO_UNAVAILABLE_MESSAGE}\n`);
       return { hasAudio: false };
@@ -89,10 +193,16 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     return { hasAudio: true };
   };
 
-  // Task 6 replaces this stub with the decode feed. A no-arg arrow is
-  // assignable to the contract's (timeMs: number) => void and keeps the
-  // unused-parameter lint quiet until then.
-  const playFrom = (): void => undefined;
+  const playFrom = (timeMs: number): void => {
+    if (closed || device === null) {
+      return;
+    }
+    killDecoder();
+    device.clearQueue();
+    framesWritten = 0;
+    framesPlayed = 0;
+    decoder = spawnDecoder(timeMs, device);
+  };
 
   const pause = (): void => {
     if (closed || device === null) {

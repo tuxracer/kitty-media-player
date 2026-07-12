@@ -9,6 +9,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import {
   AUDIO_UNAVAILABLE_MESSAGE,
+  BYTES_PER_SAMPLE,
+  CHANNELS,
   RTAUDIO_FORMAT_SINT16,
   SAMPLE_RATE,
   VOLUME_MUTED,
@@ -281,5 +283,157 @@ describe('createFfmpegAudioPlayer open and close', () => {
     await player.close();
     await player.close();
     expect(fake.closeCalls).toBe(1);
+  });
+
+  it('closes a device that finishes opening after close', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    const opening = player.open();
+    await player.close();
+    await expect(opening).resolves.toEqual({ hasAudio: false });
+    // Every created device gets closed, whether close() lands during the
+    // ffprobe await or during the createDevice await.
+    expect(fake.closeCalls).toBe(fake.createCalls);
+  });
+});
+
+/** Polls until the condition holds or five seconds pass */
+const waitFor = async (condition: () => boolean): Promise<void> => {
+  const deadlineMs = Date.now() + 5_000;
+  while (Date.now() < deadlineMs) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('condition not met within 5s');
+};
+
+describe('createFfmpegAudioPlayer playback', () => {
+  it('feeds the device exact device-frame chunks after playFrom', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    player.playFrom(0);
+    await waitFor(() => fake.written.length >= 3);
+    const expectedBytes = FAKE_FRAME_SIZE * CHANNELS * BYTES_PER_SAMPLE;
+    for (const chunk of fake.written) {
+      expect(chunk.length).toBe(expectedBytes);
+    }
+    await player.close();
+  });
+
+  it('stops feeding at the queue cap until the device plays frames', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    player.playFrom(0);
+    // 500 ms cap at 1024 samples per frame and 48 kHz is 24 frames. The 2 s
+    // fixture holds about 94, so an uncapped feed would blow far past this.
+    const capFrames = Math.ceil((500 / 1_000) * (SAMPLE_RATE / FAKE_FRAME_SIZE));
+    await waitFor(() => fake.written.length >= capFrames);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const writtenAtCap = fake.written.length;
+    expect(writtenAtCap).toBeLessThan(capFrames * 2);
+    fake.playFrames(capFrames);
+    await waitFor(() => fake.written.length > writtenAtCap);
+    await player.close();
+  });
+
+  it('tracks position as the playFrom offset plus frames actually played', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    expect(player.getPositionMs()).toBeNull();
+    player.playFrom(500);
+    expect(player.getPositionMs()).toBe(500);
+    await waitFor(() => fake.written.length >= 10);
+    fake.playFrames(10);
+    const frameMs = (FAKE_FRAME_SIZE / SAMPLE_RATE) * 1_000;
+    expect(player.getPositionMs()).toBeCloseTo(500 + 10 * frameMs, 5);
+    await player.close();
+  });
+
+  it('pause clears the device queue and nulls the position', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    player.playFrom(0);
+    await waitFor(() => fake.written.length >= 1);
+    player.pause();
+    // playFrom cleared once (fresh start), pause cleared again
+    expect(fake.clearQueueCalls).toBe(2);
+    expect(player.getPositionMs()).toBeNull();
+    await player.close();
+  });
+
+  it('playFrom while playing restarts cleanly from the new offset', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    player.playFrom(0);
+    await waitFor(() => fake.written.length >= 1);
+    player.playFrom(1_000);
+    // Both playFrom calls clear the queue for a fresh start
+    expect(fake.clearQueueCalls).toBe(2);
+    expect(player.getPositionMs()).toBe(1_000);
+    await waitFor(() => fake.written.length >= 1);
+    await player.close();
+  });
+
+  it('mute and unmute flip the device volume without stopping the feed', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    player.playFrom(0);
+    player.setMuted(true);
+    player.setMuted(false);
+    // open() applied full volume once, then the two toggles
+    expect(fake.volumes).toEqual([1, 0, 1]);
+    expect(player.getPositionMs()).toBe(0);
+    await player.close();
+  });
+
+  it('opening muted applies zero volume at open', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    player.setMuted(true);
+    await player.open();
+    expect(fake.volumes).toEqual([0]);
+    await player.close();
+  });
+
+  it('notes a decoder death once on stderr', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      player.playFrom(0);
+      // Killing the decoder on purpose (the respawn below) must NOT note a
+      // failure. Deleting the file makes the respawned ffmpeg exit nonzero
+      // immediately, which must note exactly once.
+      await rm(withAudio);
+      player.playFrom(0);
+      await waitFor(() =>
+        stderrSpy.mock.calls.some(([text]) => String(text).includes('audio decode failed')),
+      );
+      const notices = stderrSpy.mock.calls.filter(([text]) =>
+        String(text).includes('audio decode failed'),
+      );
+      expect(notices).toHaveLength(1);
+    } finally {
+      stderrSpy.mockRestore();
+      await player.close();
+      // Regenerate the fixture for any tests that still need it
+      if (ffmpegPath !== null) {
+        const encode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
+        await execFileAsync(ffmpegPath, [
+          '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x36:rate=10',
+          '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+          ...encode, '-c:a', 'aac', '-shortest', withAudio,
+        ]);
+      }
+    }
   });
 });
