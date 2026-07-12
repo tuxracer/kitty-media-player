@@ -67,6 +67,8 @@ export interface AudioDecoder {
   startMs: number;
   /** True when this decoder was killed on purpose (pause, respawn, close) */
   killed: boolean;
+  /** True when this decoder's process exited cleanly at the natural end of the audio stream */
+  ended: boolean;
   /** The ffmpeg child process, stdout piped for PCM, stderr piped for errors */
   child: ChildProcessByStdio<null, Readable, Readable>;
 }

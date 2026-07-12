@@ -108,7 +108,7 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
 
-    const current: AudioDecoder = { startMs, killed: false, child };
+    const current: AudioDecoder = { startMs, killed: false, ended: false, child };
     const bytes = frameBytes(activeDevice);
 
     // Chunks accumulate until at least one whole device frame arrived, then
@@ -163,6 +163,8 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     child.on('close', (code, signal) => {
       if (code !== 0 || signal !== null) {
         noteFailure();
+      } else if (!current.killed) {
+        current.ended = true;
       }
     });
 
@@ -223,6 +225,9 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
 
   const getPositionMs = (): number | null => {
     if (closed || device === null || decoder === null) {
+      return null;
+    }
+    if (decoder.ended && framesPlayed >= framesWritten) {
       return null;
     }
     return decoder.startMs + framesPlayed * frameDurationMs(device);

@@ -140,6 +140,7 @@ let fixtureDir: string;
 let withAudio: string;
 let silentVideo: string;
 let notMedia: string;
+let shortAudio: string;
 
 const FIXTURE_TIMEOUT_MS = 60_000;
 
@@ -151,6 +152,7 @@ beforeAll(async () => {
   withAudio = join(fixtureDir, 'with-audio.mp4');
   silentVideo = join(fixtureDir, 'silent.mp4');
   notMedia = join(fixtureDir, 'not-media.txt');
+  shortAudio = join(fixtureDir, 'short-audio.mp4');
   const encode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
   await execFileAsync(ffmpegPath, [
     '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x36:rate=10',
@@ -161,6 +163,14 @@ beforeAll(async () => {
     '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x36:rate=10', ...encode, silentVideo,
   ]);
   await writeFile(notMedia, 'this is not a media file\n');
+  // Video runs 2s, audio only 1s, without -shortest so the container keeps
+  // going until the video stream finishes. Exercises the decoder's clean
+  // end-of-stream exit while the video clock is still running.
+  await execFileAsync(ffmpegPath, [
+    '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x36:rate=10',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+    ...encode, '-c:a', 'aac', shortAudio,
+  ]);
 }, FIXTURE_TIMEOUT_MS);
 
 afterAll(async () => {
@@ -400,6 +410,55 @@ describe('createFfmpegAudioPlayer playback', () => {
     player.setMuted(true);
     await player.open();
     expect(fake.volumes).toEqual([0]);
+    await player.close();
+  });
+
+  it('parks the position at null after the audio track ends and drains', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: shortAudio, createDevice: fake.createDevice });
+    await player.open();
+    player.playFrom(0);
+
+    // Some frames arrive and queue up (the queue cap holds off the rest)
+    // before anything has played, so a backlog exists. Position must still
+    // advance normally here, whether or not the decoder has already exited.
+    await waitFor(() => fake.written.length >= 10);
+    expect(player.getPositionMs()).not.toBeNull();
+
+    // Drain everything the decoder has queued or will queue, repeatedly,
+    // until writes stop arriving. The audio track is only ~1s (about 47
+    // frames at 1024 samples), and the fake device applies no realtime
+    // pacing, so this settles fast.
+    let played = 0;
+    let lastWritten = -1;
+    let stableSince = Date.now();
+    const deadlineMs = Date.now() + 5_000;
+    while (Date.now() - stableSince < 300) {
+      if (Date.now() > deadlineMs) {
+        throw new Error('writes never stabilized within 5s');
+      }
+      if (fake.written.length !== lastWritten) {
+        lastWritten = fake.written.length;
+        stableSince = Date.now();
+      }
+      if (fake.written.length > played) {
+        const toPlay = fake.written.length - played;
+        fake.playFrames(toPlay);
+        played += toPlay;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    // Drain anything left queued so framesPlayed catches up to framesWritten.
+    const remaining = fake.written.length - played;
+    if (remaining > 0) {
+      fake.playFrames(remaining);
+      played += remaining;
+    }
+
+    // The decoder's 'close' event lands asynchronously, so ended flips some
+    // time after the last data event.
+    await waitFor(() => player.getPositionMs() === null);
     await player.close();
   });
 
