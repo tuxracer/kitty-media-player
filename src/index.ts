@@ -91,3 +91,15 @@ export type {
   MediaProbeResult,
   VideoProbeResult,
 } from './mediaProbe/index.ts';
+
+export {
+  BUFFER_MARGIN_MS,
+  PCM_SAMPLE_RATE,
+  TRACE_RGB,
+  WAVEFORM_FPS,
+  WAVEFORM_HEIGHT,
+  WAVEFORM_WIDTH,
+  WINDOW_MS,
+  createWaveformSource,
+} from './waveformSource/index.ts';
+export type { WaveformSourceOptions } from './waveformSource/index.ts';
