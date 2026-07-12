@@ -1,14 +1,17 @@
 import { PassThrough } from 'node:stream';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { LOADING_DELAY_MS } from '../Video/index.tsx';
 // Import from parseCliArgs.ts directly (not ./index.tsx) because importing
 // the entry module would run the CLI at module top level.
 import { parseCliArgs } from './parseCliArgs.ts';
 import { detectFallbackReasons } from './detectFallbackReasons.ts';
 import { confirmFallback } from './confirmFallback.ts';
-import { FALLBACK_PROMPT, RENDER_MODES } from './consts.ts';
+import { startLoadingIndicator } from './loadingIndicator.ts';
+import { CLEAR_LINE, FALLBACK_PROMPT, RENDER_MODES, SPINNER_INTERVAL_MS } from './consts.ts';
 import { isRenderMode } from './types.ts';
+import type { LoadingIndicatorOutput } from './types.ts';
 
 describe('parseCliArgs', () => {
   it('returns play when no arguments are given', () => {
@@ -221,5 +224,69 @@ describe('confirmFallback', () => {
     const pending = confirmFallback({ input, output, prompt: FALLBACK_PROMPT });
     input.emit('error', new Error('boom'));
     await expect(pending).resolves.toBe(false);
+  });
+});
+
+describe('startLoadingIndicator', () => {
+  interface CaptureOutput extends LoadingIndicatorOutput {
+    writes: string[];
+  }
+
+  const createOutput = (isTTY: boolean): CaptureOutput => {
+    const output: CaptureOutput = {
+      isTTY,
+      writes: [],
+      write: (text: string) => {
+        output.writes.push(text);
+        return true;
+      },
+    };
+    return output;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('stays silent when stopped before the delay', () => {
+    const output = createOutput(true);
+    const indicator = startLoadingIndicator('movie.mp4', output);
+    vi.advanceTimersByTime(LOADING_DELAY_MS - 1);
+    indicator.stop();
+    vi.advanceTimersByTime(LOADING_DELAY_MS * 2);
+    expect(output.writes).toEqual([]);
+  });
+
+  it('animates spinner frames on a TTY and erases the line on stop', () => {
+    const output = createOutput(true);
+    const indicator = startLoadingIndicator('http://example.com/movie.mp4', output);
+    vi.advanceTimersByTime(LOADING_DELAY_MS + SPINNER_INTERVAL_MS * 3);
+    // The first frame draws when the delay fires, then one per interval
+    expect(output.writes.length).toBe(4);
+    expect(output.writes[0]).toContain('loading http://example.com/movie.mp4');
+    expect(output.writes[0].startsWith('\r')).toBe(true);
+    // Frames advance, so consecutive writes differ
+    expect(output.writes[1]).not.toBe(output.writes[0]);
+    indicator.stop();
+    expect(output.writes.at(-1)).toBe(CLEAR_LINE);
+    // Stopped for good: no more frames, and stop stays idempotent
+    vi.advanceTimersByTime(SPINNER_INTERVAL_MS * 5);
+    indicator.stop();
+    expect(output.writes.at(-1)).toBe(CLEAR_LINE);
+    expect(output.writes.filter((text) => text === CLEAR_LINE).length).toBe(1);
+  });
+
+  it('prints a single plain notice when the output is not a TTY', () => {
+    const output = createOutput(false);
+    const indicator = startLoadingIndicator('movie.mp4', output);
+    vi.advanceTimersByTime(LOADING_DELAY_MS + SPINNER_INTERVAL_MS * 5);
+    expect(output.writes).toEqual(['kitty-video-player: loading movie.mp4…\n']);
+    indicator.stop();
+    // Nothing to erase on a non-TTY, the notice line stays
+    expect(output.writes.length).toBe(1);
   });
 });

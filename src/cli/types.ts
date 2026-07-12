@@ -41,6 +41,19 @@ export type ParsedCliArgs = PlayAction | HelpAction | VersionAction | UsageError
 /** Why the kitty-graphics player cannot run in this terminal */
 export type FallbackReason = 'no-placeholder-support' | 'multiplexed-session';
 
+/** Where the loading indicator writes (process.stderr in production, a capture in tests) */
+export interface LoadingIndicatorOutput {
+  /** True animates the spinner line, false/absent prints one plain notice */
+  isTTY?: boolean;
+  write(text: string): unknown;
+}
+
+/** Handle returned by startLoadingIndicator */
+export interface LoadingIndicator {
+  /** Cancels the pending indicator and erases the spinner line if one was drawn. Idempotent. */
+  stop(): void;
+}
+
 /** Streams for the fallback confirmation prompt (stdin/stderr in production) */
 export interface ConfirmFallbackOptions {
   /** Where the answer line is read from */

@@ -16,7 +16,7 @@ import { createFallbackScreen, resolveFallbackRenderMode, runFallbackPlayer } fr
 import { createFfmpegAudioPlayer } from '../ffmpegAudioPlayer/index.ts';
 import { createFfmpegSource, isFfmpegSourceError } from '../ffmpegSource/index.ts';
 import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
-import { LOADING_DELAY_MS, Video } from '../Video/index.tsx';
+import { Video } from '../Video/index.tsx';
 import { computePanelRegion } from '../playerLayout/index.ts';
 import { createProceduralSource } from '../proceduralSource/index.ts';
 import { confirmFallback } from './confirmFallback.ts';
@@ -33,11 +33,13 @@ import {
   VERSION,
 } from './consts.ts';
 import { detectFallbackReasons } from './detectFallbackReasons.ts';
+import { startLoadingIndicator } from './loadingIndicator.ts';
 import { parseCliArgs } from './parseCliArgs.ts';
 
 export { parseCliArgs } from './parseCliArgs.ts';
 export { detectFallbackReasons } from './detectFallbackReasons.ts';
 export { confirmFallback } from './confirmFallback.ts';
+export { startLoadingIndicator } from './loadingIndicator.ts';
 export * from './consts.ts';
 export * from './types.ts';
 
@@ -134,28 +136,23 @@ const openAudio = async (): Promise<AudioPlayer | null> => {
 
 // A slow open says so instead of sitting silent: remote URLs probe (and
 // sometimes measure their duration) over the network, which can take
-// seconds. Delayed so fast local opens never print it.
-const loadingTimer =
-  args.file === undefined
-    ? null
-    : setTimeout(() => {
-        process.stderr.write(`kitty-video-player: loading ${args.file}…\n`);
-      }, LOADING_DELAY_MS);
+// seconds. The indicator is delayed internally so fast local opens never
+// flash it, and stopped explicitly on the error path because process.exit
+// skips finally blocks.
+const loadingIndicator = args.file === undefined ? null : startLoadingIndicator(args.file);
 
 let info: FrameSourceInfo;
 let audio: AudioPlayer | null = null;
 try {
   [info, audio] = await Promise.all([openingSource, openAudio()]);
 } catch (error) {
+  loadingIndicator?.stop();
   await audioPlayer?.close().catch(() => undefined);
   const message = isFfmpegSourceError(error) ? error.message : String(error);
   process.stderr.write(`kitty-video-player: ${message}\n`);
   process.exit(EXIT_USAGE);
-} finally {
-  if (loadingTimer !== null) {
-    clearTimeout(loadingTimer);
-  }
 }
+loadingIndicator?.stop();
 
 // Fallback mode never touches Ink. The renderer owns the whole screen
 // (kitty at full quality or a cell renderer) and produces no placeholder

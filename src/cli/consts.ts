@@ -90,3 +90,12 @@ export const FALLBACK_KITTY_NOTE =
 
 /** Answers that accept the fallback prompt, compared trimmed and lowercased */
 export const FALLBACK_YES_ANSWERS: readonly string[] = ['y', 'yes'];
+
+/** Loading spinner frames, the same dots animation @inkjs/ui's Spinner renders inside Ink */
+export const SPINNER_FRAMES: readonly string[] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/** Milliseconds between loading spinner frames (matches @inkjs/ui's dots timing) */
+export const SPINNER_INTERVAL_MS = 80;
+
+/** Carriage return plus erase-to-end-of-line, removes the spinner line on stop */
+export const CLEAR_LINE = '\r\u001B[2K';

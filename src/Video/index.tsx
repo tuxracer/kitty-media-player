@@ -1,4 +1,4 @@
-import { ProgressBar } from '@inkjs/ui';
+import { ProgressBar, Spinner } from '@inkjs/ui';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import type { ReactElement } from 'react';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
@@ -302,7 +302,7 @@ export const Video = forwardRef<VideoRef, VideoProps>((props, ref): ReactElement
           justifyContent="center"
           alignItems="center"
         >
-          {showLoading ? <Text dimColor>{LOADING_TEXT}</Text> : null}
+          {showLoading ? <Spinner label={LOADING_TEXT} /> : null}
         </Box>
       );
     }
@@ -354,7 +354,11 @@ export const Video = forwardRef<VideoRef, VideoProps>((props, ref): ReactElement
             {' '}
             {formatTime(clock.elapsedMs)} / {formatTime(durationMs)}
           </Text>
-          {showBuffering ? <Text dimColor> {BUFFERING_TEXT}</Text> : null}
+          {showBuffering ? (
+            <Box marginLeft={1}>
+              <Spinner label={BUFFERING_TEXT} />
+            </Box>
+          ) : null}
         </Box>
       ) : null}
       {help ? <Text dimColor>{HELP_TEXT}</Text> : null}
