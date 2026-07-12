@@ -405,6 +405,33 @@ describe('runFallbackPlayer audio', () => {
     expect(audio.playFroms.at(-1)).toBeLessThan(1_000);
     await quit(state);
   });
+
+  it('snaps audio back when drift exceeds the threshold', async () => {
+    const audio = createFakeAudio();
+    const state = setup(audio);
+    // Audio far ahead of the playhead, so the once-per-second check snaps
+    audio.positionMs = 60_000;
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    // A snap landed after the initial start, back near the video clock
+    expect(audio.playFroms.length).toBeGreaterThan(1);
+    expect(audio.playFroms.at(-1)).toBeLessThan(10_000);
+    await quit(state);
+  });
+
+  it('leaves audio alone when drift stays under the threshold', async () => {
+    const audio = createFakeAudio();
+    const state = setup(audio);
+    // Track the playhead so measured drift stays near zero
+    audio.positionMs = 0;
+    const tracker = setInterval(() => {
+      audio.positionMs = (audio.positionMs ?? 0) + TICK_MS;
+    }, TICK_MS);
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    clearInterval(tracker);
+    // Only the initial start call, no snap fired
+    expect(audio.playFroms).toEqual([0]);
+    await quit(state);
+  });
 });
 
 describe('resolveFallbackRenderMode', () => {

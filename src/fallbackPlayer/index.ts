@@ -152,22 +152,30 @@ export const runFallbackPlayer = ({
       if (!playing || !screen.isWritable() || inFlight) {
         return;
       }
-      // Drift snap once per whole second, mirroring usePlaybackClock
-      const second = Math.floor(elapsedMs / MS_PER_SECOND);
-      if (second !== lastDriftSecond) {
-        lastDriftSecond = second;
-        const audioPositionMs = audio?.getPositionMs() ?? null;
-        if (audioPositionMs !== null && Math.abs(audioPositionMs - elapsedMs) > DRIFT_RESYNC_THRESHOLD_MS) {
-          audio?.playFrom(elapsedMs);
-        }
-      }
       const nextMs = elapsedMs + intervalMs;
       if (nextMs < info.durationMs) {
+        // Drift snap once per whole second, on non-wrap ticks only, so a
+        // wrap tick never fires a redundant snap right before its own
+        // playFrom. usePlaybackClock avoids the same double-fire because
+        // its snap lives in the async frame callback, after the wrap's
+        // playFrom has already restarted the audio position.
+        const second = Math.floor(elapsedMs / MS_PER_SECOND);
+        if (second !== lastDriftSecond) {
+          lastDriftSecond = second;
+          const audioPositionMs = audio?.getPositionMs() ?? null;
+          if (audioPositionMs !== null && Math.abs(audioPositionMs - elapsedMs) > DRIFT_RESYNC_THRESHOLD_MS) {
+            audio?.playFrom(elapsedMs);
+          }
+        }
         showFrameAt(nextMs);
         return;
       }
-      // Always loop, wrapping like usePlaybackClock's loop branch
+      // Always loop, wrapping like usePlaybackClock's loop branch. The
+      // wrap restarts audio itself, so realign the drift tracker to the
+      // wrapped second instead of letting the post-wrap second change
+      // trigger a spurious check.
       const wrappedMs = nextMs % info.durationMs;
+      lastDriftSecond = Math.floor(wrappedMs / MS_PER_SECOND);
       showFrameAt(wrappedMs);
       audio?.playFrom(wrappedMs);
     }, intervalMs);
