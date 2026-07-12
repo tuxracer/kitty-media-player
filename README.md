@@ -118,6 +118,25 @@ inner content of an HTML5 `<video>` tag. `srcObject` accepts any
 handle (`play()`, `pause()`, `currentTime`, `paused`, `ended`, `duration`,
 `videoWidth`, `videoHeight`) follow the DOM element, with times in seconds.
 
+Audio can be embedded directly in the same Ink tree.
+
+```tsx
+import { Text } from 'ink';
+import { Audio } from 'kitty-media-player';
+
+const App = () => (
+  <Audio src="song.mp3" autoPlay loop>
+    <Text dimColor>audio is unavailable</Text>
+  </Audio>
+);
+```
+
+Audio controls are shown by default. Set `controls={false}` to hide the row.
+The optional `width` and `height` values use terminal cells, and keyboard input
+is opt-in with `keyboard`. Children render when the initial load or audio output
+fails. `AudioRef` follows the media subset of `VideoRef` without the video
+dimensions.
+
 Beyond `Video`, the package exports the underlying pieces: the
 `FrameSource`/`FrameSourceInfo` contract, `createProceduralSource`,
 `createFfmpegSource`, `computePanelRegion`, `formatTime`, and the audio

@@ -6,13 +6,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AudioPlayer } from '../audioPlayer/index.ts';
 import type { FfmpegAudioPlayerOptions } from '../ffmpegAudioPlayer/index.ts';
 import { MediaProbeError } from '../mediaProbe/index.ts';
-import { AUDIO_TICK_MS, DRIFT_RESYNC_THRESHOLD_MS } from './consts.ts';
+import {
+  AUDIO_TICK_MS,
+  BUFFERING_TEXT,
+  DRIFT_RESYNC_THRESHOLD_MS,
+  LOADING_DELAY_MS,
+  LOADING_TEXT,
+  PAUSE_GLYPH,
+} from './consts.ts';
 import { AudioError } from './types.ts';
 import type {
+  AudioRef,
   AudioPlaybackClock,
   AudioPlaybackClockOptions,
   ManagedAudioResourcesOptions,
 } from './types.ts';
+import { Audio } from './index.tsx';
 import { useAudioPlaybackClock } from './useAudioPlaybackClock.ts';
 import { useManagedResources } from './useManagedResources.ts';
 
@@ -24,6 +33,14 @@ const ffmpegAudioMocks = vi.hoisted(() => ({
   createFfmpegAudioPlayer: vi.fn(),
 }));
 
+const appMocks = vi.hoisted(() => ({
+  exit: vi.fn(),
+}));
+
+vi.mock('ink', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('ink')>()),
+  useApp: () => ({ exit: appMocks.exit }),
+}));
 vi.mock('../mediaProbe/index.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../mediaProbe/index.ts')>()),
   ...mediaProbeMocks,
@@ -106,6 +123,15 @@ const createDeferred = <T,>(): Deferred<T> => {
     rejectPromise = reject;
   });
   return { promise, resolve: resolvePromise, reject: rejectPromise };
+};
+
+const mockSuccessfulLoad = (harness: FakeAudioHarness, durationMs: number): void => {
+  mediaProbeMocks.probeMediaFile.mockResolvedValue({
+    kind: 'audio',
+    durationMs,
+    coverArt: null,
+  });
+  ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(harness.audio);
 };
 
 const ManagedResourcesHarness = (props: ManagedAudioResourcesOptions) => {
@@ -299,6 +325,217 @@ describe('useManagedResources', () => {
 
     expect(onLoadedMetadata).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('Audio', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows controls by default and hides them only when controls is false', async () => {
+    const harness = createFakeAudio();
+    mockSuccessfulLoad(harness, 20_000);
+    const shown = render(<Audio src="song.mp3" />);
+    await flush();
+    expect(shown.lastFrame()).toContain(PAUSE_GLYPH);
+    expect(shown.lastFrame()).toContain('0:00 / 0:20');
+    shown.unmount();
+
+    const hidden = render(<Audio src="song.mp3" controls={false} />);
+    await flush();
+    expect(hidden.lastFrame()).toBe('');
+    hidden.unmount();
+  });
+
+  it('exposes HTML-shaped transport and metadata through AudioRef', async () => {
+    const harness = createFakeAudio();
+    mockSuccessfulLoad(harness, 20_000);
+    const ref = createRef<AudioRef>();
+    const view = render(<Audio ref={ref} src="song.mp3" />);
+    await flush();
+
+    expect(ref.current?.duration).toBe(20);
+    expect(ref.current?.paused).toBe(true);
+    ref.current!.currentTime = 5;
+    await ref.current?.play();
+    expect(harness.playFroms).toEqual([5_000]);
+    ref.current!.muted = true;
+    await flush();
+    expect(harness.mutedValues.at(-1)).toBe(true);
+    expect(ref.current?.muted).toBe(true);
+    view.unmount();
+  });
+
+  it('delays loading and buffering indicators and hides them without controls', async () => {
+    const pending = createDeferred<{
+      kind: 'audio';
+      durationMs: number;
+      coverArt: null;
+    }>();
+    const harness = createFakeAudio();
+    mediaProbeMocks.probeMediaFile.mockReturnValue(pending.promise);
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(harness.audio);
+    const loading = render(<Audio src="song.mp3" />);
+    await advance(LOADING_DELAY_MS - 1);
+    expect(loading.lastFrame()).not.toContain(LOADING_TEXT);
+    await advance(1);
+    expect(loading.lastFrame()).toContain(LOADING_TEXT);
+    loading.unmount();
+
+    const hidden = render(<Audio src="song.mp3" controls={false} />);
+    await advance(LOADING_DELAY_MS);
+    expect(hidden.lastFrame()).toBe('');
+    hidden.unmount();
+
+    harness.starting = true;
+    mockSuccessfulLoad(harness, 20_000);
+    const buffering = render(<Audio src="song.mp3" autoPlay />);
+    await flush();
+    await advance(LOADING_DELAY_MS - 1);
+    expect(buffering.lastFrame()).not.toContain(BUFFERING_TEXT);
+    await advance(1);
+    expect(buffering.lastFrame()).toContain(BUFFERING_TEXT);
+    buffering.unmount();
+  });
+
+  it('uses width for the progress bar and centers the row within height', async () => {
+    const harness = createFakeAudio();
+    mockSuccessfulLoad(harness, 20_000);
+    const natural = render(<Audio src="song.mp3" />);
+    const sized = render(<Audio src="song.mp3" width={20} />);
+    const narrow = render(<Audio src="song.mp3" width={5} />);
+    const tall = render(<Audio src="song.mp3" height={3} />);
+    await flush();
+
+    expect(natural.lastFrame()).toHaveLength(47);
+    expect(sized.lastFrame()).toHaveLength(20);
+    expect(narrow.lastFrame()).toHaveLength(15);
+    expect(tall.lastFrame()?.split('\n')).toEqual(['', natural.lastFrame(), '']);
+    natural.unmount();
+    sized.unmount();
+    narrow.unmount();
+    tall.unmount();
+  });
+
+  it('handles transport keys only when keyboard is enabled', async () => {
+    const enabledAudio = createFakeAudio();
+    mockSuccessfulLoad(enabledAudio, 20_000);
+    const enabled = render(<Audio src="song.mp3" keyboard />);
+    await flush();
+    enabled.stdin.write(' ');
+    enabled.stdin.write('\u001B[C');
+    enabled.stdin.write('\u001B[D');
+    enabled.stdin.write('m');
+    await flush();
+    expect(enabledAudio.playFroms).toEqual([0, 5_000, 0]);
+    expect(enabledAudio.mutedValues.at(-1)).toBe(true);
+    enabled.unmount();
+
+    const disabledAudio = createFakeAudio();
+    mockSuccessfulLoad(disabledAudio, 20_000);
+    const disabled = render(<Audio src="song.mp3" />);
+    await flush();
+    disabled.stdin.write(' ');
+    disabled.stdin.write('\u001B[C');
+    disabled.stdin.write('m');
+    disabled.stdin.write('q');
+    await flush();
+    expect(disabledAudio.playFroms).toEqual([]);
+    expect(disabledAudio.mutedValues).toEqual([false]);
+    expect(appMocks.exit).not.toHaveBeenCalled();
+    disabled.unmount();
+  });
+
+  it.each(['q', '\u0003'])('requests close before exiting for %j', async (input) => {
+    const calls: string[] = [];
+    const harness = createFakeAudio();
+    harness.audio.close = () => {
+      calls.push('close');
+      return Promise.resolve();
+    };
+    appMocks.exit.mockImplementation(() => calls.push('exit'));
+    mockSuccessfulLoad(harness, 20_000);
+    const view = render(<Audio src="song.mp3" keyboard />);
+    await flush();
+    view.stdin.write(input);
+    await flush();
+    expect(calls).toEqual(['close', 'exit']);
+    view.unmount();
+  });
+
+  it('renders children after errors even without controls and otherwise renders nothing', async () => {
+    mediaProbeMocks.probeMediaFile.mockRejectedValue(new Error('failed'));
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(createFakeAudio().audio);
+    const fallback = render(
+      <Audio src="song.mp3" controls={false}>
+        <Text>audio unavailable</Text>
+      </Audio>,
+    );
+    const empty = render(<Audio src="song.mp3" controls={false} />);
+    await flush();
+    expect(fallback.lastFrame()).toBe('audio unavailable');
+    expect(empty.lastFrame()).toBe('');
+    fallback.unmount();
+    empty.unmount();
+  });
+
+  it('applies prop muting and reports metadata and time callbacks in seconds', async () => {
+    const harness = createFakeAudio();
+    const onLoadedMetadata = vi.fn();
+    const onTimeUpdate = vi.fn();
+    mockSuccessfulLoad(harness, 20_000);
+    const view = render(
+      <Audio
+        src="song.mp3"
+        muted
+        autoPlay
+        onLoadedMetadata={onLoadedMetadata}
+        onTimeUpdate={onTimeUpdate}
+      />,
+    );
+    await flush();
+    expect(harness.mutedValues.at(-1)).toBe(true);
+    expect(onLoadedMetadata).toHaveBeenCalledWith({ duration: 20 });
+    await advance(AUDIO_TICK_MS + 1_000);
+    expect(onTimeUpdate).toHaveBeenCalledWith({ currentTime: 1, duration: 20 });
+    view.unmount();
+  });
+
+  it('reports NaN before load and resets metadata and playhead when src changes', async () => {
+    const first = createFakeAudio();
+    const second = createFakeAudio();
+    const secondProbe = createDeferred<{
+      kind: 'audio';
+      durationMs: number;
+      coverArt: null;
+    }>();
+    mediaProbeMocks.probeMediaFile
+      .mockResolvedValueOnce({ kind: 'audio', durationMs: 20_000, coverArt: null })
+      .mockReturnValueOnce(secondProbe.promise);
+    ffmpegAudioMocks.createFfmpegAudioPlayer
+      .mockReturnValueOnce(first.audio)
+      .mockReturnValueOnce(second.audio);
+    const ref = createRef<AudioRef>();
+    const view = render(<Audio ref={ref} src="first.mp3" />);
+    expect(ref.current?.duration).toBe(Number.NaN);
+    await flush();
+    ref.current!.currentTime = 5;
+    expect(ref.current?.currentTime).toBe(5);
+
+    view.rerender(<Audio ref={ref} src="second.mp3" />);
+    await flush();
+    expect(ref.current?.duration).toBe(Number.NaN);
+    expect(ref.current?.currentTime).toBe(0);
+    secondProbe.resolve({ kind: 'audio', durationMs: 10_000, coverArt: null });
+    await flush();
+    expect(ref.current?.duration).toBe(10);
+    view.unmount();
   });
 });
 

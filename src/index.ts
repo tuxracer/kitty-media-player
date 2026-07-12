@@ -43,6 +43,21 @@ export {
   SEEK_STEP_MS,
 } from './Video/index.tsx';
 
+export { Audio, AudioError, isAudioError, useAudioPlaybackClock } from './Audio/index.tsx';
+export type {
+  AudioErrorCode,
+  AudioLoadedMetadataEvent,
+  AudioPlaybackCallbacks,
+  AudioPlaybackClock,
+  AudioPlaybackClockOptions,
+  AudioProps,
+  AudioRef,
+  AudioTimeUpdateEvent,
+  ManagedAudioResources,
+  ManagedAudioResourcesOptions,
+  ManagedAudioStatus,
+} from './Audio/index.tsx';
+
 export type { FrameSource, FrameSourceInfo } from './frameSource/index.ts';
 
 export type { AudioPlayer, AudioPlayerInfo } from './audioPlayer/index.ts';
