@@ -158,18 +158,27 @@ const region = computePanelRegion({
 
 // Create the Screen before rendering Ink: createScreen runs terminal probes
 // that read stdin, and that must finish before Ink's useInput takes over stdin.
-const screen = await createScreen({
-  output: process.stdout,
-  sourceWidth: info.width,
-  sourceHeight: info.height,
-  colorSpace: info.colorSpace,
-  renderMode: forceKitty ? 'kitty' : undefined,
-  placement: 'unicode',
-  embedded: true,
-  region,
-  autoResize: false,
-  autoDispose: false,
-});
+let screen: Awaited<ReturnType<typeof createScreen>>;
+try {
+  screen = await createScreen({
+    output: process.stdout,
+    sourceWidth: info.width,
+    sourceHeight: info.height,
+    colorSpace: info.colorSpace,
+    renderMode: forceKitty ? 'kitty' : undefined,
+    placement: 'unicode',
+    embedded: true,
+    region,
+    autoResize: false,
+    autoDispose: false,
+  });
+} catch (error) {
+  // A failed probe handshake must not strand the decoder processes
+  await source.close().catch(() => undefined);
+  await audio?.close().catch(() => undefined);
+  process.stderr.write(`kitty-video-player: ${String(error)}\n`);
+  process.exit(EXIT_USAGE);
+}
 
 // exitOnCtrlC: false so Video's own input handler can dispose the Screen
 // and close the source before Ink tears the render down.
