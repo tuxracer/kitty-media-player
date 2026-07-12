@@ -80,6 +80,9 @@ export { FfmpegSourceError, createFfmpegSource, isFfmpegSourceError } from './ff
 export type { DecodeSize, FfmpegSourceErrorCode, FfmpegSourceOptions } from './ffmpegSource/index.ts';
 export { MAX_DECODE_HEIGHT, MAX_DECODE_WIDTH, computeDecodeSize } from './ffmpegSource/index.ts';
 
+export { COVER_ART_FPS, createCoverArtSource } from './coverArtSource/index.ts';
+export type { CoverArtSourceOptions } from './coverArtSource/index.ts';
+
 export { MediaProbeError, isMediaProbeError, probeMediaFile } from './mediaProbe/index.ts';
 export type {
   AudioProbeResult,
