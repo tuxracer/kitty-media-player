@@ -34,7 +34,7 @@ beforeAll(async () => {
   toneMp3 = join(fixtureDir, 'tone.mp3');
   silenceMp3 = join(fixtureDir, 'silence.mp3');
   await execFileAsync(ffmpegPath, [
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', toneMp3,
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-af', 'volume=6', toneMp3,
   ]);
   await execFileAsync(ffmpegPath, [
     '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', silenceMp3,

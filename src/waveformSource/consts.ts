@@ -41,4 +41,4 @@ const TRACE_BLUE = 160;
 export const TRACE_RGB: readonly [number, number, number] = [TRACE_RED, TRACE_GREEN, TRACE_BLUE];
 
 /** Vertical headroom so a full-scale sample never touches the canvas edge */
-export const AMPLITUDE_SCALE = 2.0;
+export const AMPLITUDE_SCALE = 0.9;

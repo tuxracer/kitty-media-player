@@ -97,8 +97,8 @@ export const createWaveformSource = (options: WaveformSourceOptions): FrameSourc
         min = Math.min(min, sample);
         max = Math.max(max, sample);
       }
-      const yTop = Math.round(centerY - max * scale);
-      const yBottom = Math.round(centerY - min * scale);
+      const yTop = Math.max(0, Math.round(centerY - max * scale));
+      const yBottom = Math.min(WAVEFORM_HEIGHT - 1, Math.round(centerY - min * scale));
       for (let y = yTop; y <= yBottom; y++) {
         const offset = (y * WAVEFORM_WIDTH + x) * RGB_CHANNELS;
         frameBuffer[offset] = TRACE_RGB[0];
