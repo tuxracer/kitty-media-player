@@ -57,7 +57,7 @@ renderer (cell-background on Terminal.app, half-block elsewhere).`;
 export const UNSUPPORTED_TERMINAL_MESSAGE =
   'kitty-player needs an interactive terminal (stdout is not a TTY). Nothing was drawn.';
 
-/** First line of the warning printed before the half-block prompt */
+/** First line of the warning printed before the fallback prompt */
 export const FALLBACK_WARNING_HEADER = 'kitty-player: the full player cannot run here:';
 
 /** One warning line per fallback reason, printed under FALLBACK_WARNING_HEADER */
@@ -70,7 +70,7 @@ export const FALLBACK_REASON_MESSAGES: Record<FallbackReason, string> = {
 
 /** The [y/N] question printed after the fallback warning lines */
 export const FALLBACK_PROMPT =
-  'Continue in half-block mode (reduced quality, no on-screen UI)? [y/N] ';
+  'Continue in fallback mode (reduced quality, no on-screen UI)? [y/N] ';
 
-/** Answers that accept the half-block prompt, compared trimmed and lowercased */
+/** Answers that accept the fallback prompt, compared trimmed and lowercased */
 export const FALLBACK_YES_ANSWERS: readonly string[] = ['y', 'yes'];

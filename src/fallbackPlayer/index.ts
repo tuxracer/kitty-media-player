@@ -1,4 +1,5 @@
-import { Screen } from 'kitty-motion';
+import { Screen, detectCellRenderMode } from 'kitty-motion';
+import type { CellRenderMode } from 'kitty-motion';
 
 import type { FrameSourceInfo } from '../frameSource/index.ts';
 import { SEEK_STEP_MS } from '../Video/index.tsx';
@@ -16,22 +17,27 @@ export * from './consts.ts';
 export * from './types.ts';
 
 /**
- * Construct the half-block Screen synchronously and probe-free, the same
- * trick as the Video module's managedScreen. renderMode forced to
- * "half-block" skips the graphics probe, which matters because an
- * unsupported terminal may never answer probe queries. fileTransfer false
- * and dirtyRects false skip the remaining probes. Runs in full-screen
- * destructive mode, so kitty-motion clears the screen, fits and centers the
- * frame, follows terminal resizes via autoResize, and restores the terminal
- * on dispose.
+ * Construct the fallback Screen synchronously and probe-free, the same trick
+ * as the Video module's managedScreen. The render mode is always passed
+ * explicitly because probe-free construction with an undefined renderMode
+ * would select the kitty renderer. When no mode is forced, kitty-motion's
+ * detectCellRenderMode picks it (cell-background on Terminal.app, whose
+ * baseline-anchored block glyphs break half-block, and half-block everywhere
+ * else). fileTransfer false and dirtyRects false skip the remaining probes.
+ * Runs in full-screen destructive mode, so kitty-motion clears the screen,
+ * fits and centers the frame, follows terminal resizes via autoResize, and
+ * restores the terminal on dispose.
  */
-export const createFallbackScreen = (info: FrameSourceInfo): Screen =>
+export const createFallbackScreen = (
+  info: FrameSourceInfo,
+  renderMode?: CellRenderMode,
+): Screen =>
   new Screen({
     output: process.stdout,
     sourceWidth: info.width,
     sourceHeight: info.height,
     colorSpace: info.colorSpace,
-    renderMode: 'half-block',
+    renderMode: renderMode ?? detectCellRenderMode(),
     fileTransfer: false,
     dirtyRects: false,
     embedded: false,
@@ -39,8 +45,8 @@ export const createFallbackScreen = (info: FrameSourceInfo): Screen =>
   });
 
 /**
- * Playback loop for half-block fallback mode. There is no Ink here because
- * the half-block renderer writes cells directly and produces no placeholder
+ * Playback loop for cell-renderer fallback mode. There is no Ink here because
+ * the cell renderer writes cells directly and produces no placeholder
  * rows, so there is nothing for Ink to lay out. This is a plain-function port of
  * usePlaybackClock's behavior (a setInterval at the source frame rate, an
  * in-flight guard so async getFrameAt calls never pile up, frames straight

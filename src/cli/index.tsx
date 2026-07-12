@@ -3,7 +3,7 @@
  * Executable CLI entry (built as dist/cli.js, the package bin). Parses argv,
  * guards on terminal capability, then hands either a procedural or an
  * ffmpeg-decoded FrameSource and a kitty-motion Screen to the Ink Video component.
- * In half-block mode the Screen goes to runFallbackPlayer instead and Ink
+ * In fallback mode the Screen goes to runFallbackPlayer instead and Ink
  * never renders. Importing this module runs the CLI, so tests import
  * parseCliArgs from ./parseCliArgs.ts directly.
  */
@@ -59,13 +59,25 @@ if (!process.stdout.isTTY) {
   process.exit(EXIT_OK);
 }
 
+// --render-mode kitty forces the full player, --fallback forces the cell
+// renderer. Asking for both at once is contradictory.
+if (args.fallback && args.renderMode === 'kitty') {
+  process.stderr.write(
+    `kitty-player: --fallback conflicts with --render-mode kitty\n\n${HELP_TEXT}\n`,
+  );
+  process.exit(EXIT_USAGE);
+}
+
 // The kitty-graphics player needs placeholder support outside a multiplexer.
 // When it cannot run, offer fallback mode. --fallback skips both the
 // detection and the prompt (it also forces fallback on a supported
-// terminal, doubling as a test path). This all happens before any Screen or
-// Ink render exists, so the prompt can read stdin in cooked mode.
-let fallback = args.fallback;
-if (!fallback) {
+// terminal, doubling as a test path). --render-mode kitty forces the full
+// player past detection. Any other --render-mode implies fallback, since a
+// cell mode has no meaning in the Ink player. This all happens before any
+// Screen or Ink render exists, so the prompt can read stdin in cooked mode.
+const forceKitty = args.renderMode === 'kitty';
+let fallback = args.fallback || (args.renderMode !== undefined && !forceKitty);
+if (!fallback && !forceKitty) {
   const reasons = detectFallbackReasons();
   if (reasons.length > 0) {
     const reasonLines = reasons.map((reason) => `  - ${FALLBACK_REASON_MESSAGES[reason]}`);
@@ -93,7 +105,10 @@ try {
 // screen and produces no placeholder rows to lay out. The playback loop
 // resolves when the user quits, with the screen disposed and source closed.
 if (fallback) {
-  const fallbackScreen = createFallbackScreen(info);
+  const fallbackScreen = createFallbackScreen(
+    info,
+    args.renderMode === 'kitty' ? undefined : args.renderMode,
+  );
   await runFallbackPlayer({
     screen: fallbackScreen,
     source,
@@ -117,6 +132,7 @@ const screen = await createScreen({
   sourceWidth: info.width,
   sourceHeight: info.height,
   colorSpace: info.colorSpace,
+  renderMode: forceKitty ? 'kitty' : undefined,
   placement: 'unicode',
   embedded: true,
   region,

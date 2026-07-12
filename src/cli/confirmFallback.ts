@@ -4,7 +4,7 @@ import { FALLBACK_PROMPT, FALLBACK_YES_ANSWERS } from './consts.ts';
 import type { ConfirmFallbackOptions } from './types.ts';
 
 /**
- * Ask whether to continue in half-block mode. Writes the prompt to output
+ * Ask whether to continue in fallback mode. Writes the prompt to output
  * (stderr in production, keeping stdout clean for the renderer) and reads one
  * line from input in cooked mode. Resolves true only for a y/yes answer.
  * Anything else, an empty line, or EOF resolves false. An input stream error

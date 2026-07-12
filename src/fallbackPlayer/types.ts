@@ -3,7 +3,7 @@ import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
 /**
  * Structural subset of kitty-motion's Screen that the fallback player uses,
  * so tests can pass a plain fake without casts. Narrower than PlayerScreen
- * because the half-block renderer has no placeholder rows or region to manage.
+ * because the cell renderer has no placeholder rows or region to manage.
  */
 export interface FallbackScreen {
   pushFrame(frame: Uint8Array): void;

@@ -7,10 +7,12 @@ A terminal video player. The UI (title, progress bar, controls) is an [Ink](http
 - Node.js >= 24
 - An interactive Kitty or Ghostty terminal (Kitty graphics protocol with
   Unicode placeholder support) outside tmux or GNU screen. On other
-  interactive terminals kitty-player offers to play in half-block mode
-  instead (reduced quality, keys work, no on-screen UI), and `--half-block`
-  selects that mode directly. When stdout is not a TTY it prints a notice
-  and exits without drawing
+  interactive terminals kitty-player offers to play with a fallback cell
+  renderer instead (cell-background on Terminal.app, half-block elsewhere,
+  reduced quality, keys work, no on-screen UI). `--fallback` selects the
+  fallback directly, and `--render-mode` forces a specific mode in either
+  direction, including `kitty` to bypass detection. When stdout is not a
+  TTY it prints a notice and exits without drawing
 - ffmpeg is bundled (via ffmpeg-static and ffprobe-static), no system install needed
 
 ## Install and run
