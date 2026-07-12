@@ -159,6 +159,9 @@ export const probeFile = async (filePath: string): Promise<ProbeResult> => {
   if (video === undefined) {
     throw new FfmpegSourceError('NO_VIDEO_STREAM', `${filePath}: no video stream`);
   }
+  const hasAudio = parsed.streams.some(
+    (stream) => isRecord(stream) && stream.codec_type === 'audio',
+  );
 
   const nativeWidth = asFiniteNumber(video.width);
   const nativeHeight = asFiniteNumber(video.height);
@@ -196,5 +199,6 @@ export const probeFile = async (filePath: string): Promise<ProbeResult> => {
     nativeHeight: quarterTurned ? nativeWidth : nativeHeight,
     durationMs,
     fps,
+    hasAudio,
   };
 };

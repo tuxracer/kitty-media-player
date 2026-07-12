@@ -300,6 +300,32 @@ describe('createFfmpegAudioPlayer open and close', () => {
     }
   });
 
+  it('uses an injected probeAudio instead of running its own ffprobe', async () => {
+    const fake = createFakeDeviceFactory();
+    // silentVideo has no audio stream, so a real probe would refuse: the
+    // injected result must win
+    const player = createFfmpegAudioPlayer({
+      filePath: silentVideo,
+      createDevice: fake.createDevice,
+      probeAudio: () => Promise.resolve(true),
+    });
+    await expect(player.open()).resolves.toEqual({ hasAudio: true });
+    expect(fake.createCalls).toBe(1);
+    await player.close();
+  });
+
+  it('opens silent when the injected probeAudio rejects', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({
+      filePath: withAudio,
+      createDevice: fake.createDevice,
+      probeAudio: () => Promise.reject(new Error('shared video probe failed')),
+    });
+    await expect(player.open()).resolves.toEqual({ hasAudio: false });
+    expect(fake.createCalls).toBe(0);
+    await player.close();
+  });
+
   it('a second open reuses the device instead of opening another', async () => {
     const fake = createFakeDeviceFactory();
     const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });

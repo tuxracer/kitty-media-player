@@ -31,6 +31,7 @@ let audioOnly: string;
 let notVideo: string;
 let rotatedVideo: string;
 let noDurationVideo: string;
+let soundVideo: string;
 
 const FIXTURE_TIMEOUT_MS = 60_000;
 
@@ -45,9 +46,15 @@ beforeAll(async () => {
   notVideo = join(fixtureDir, 'not-a-video.txt');
   rotatedVideo = join(fixtureDir, 'rotated.mp4');
   noDurationVideo = join(fixtureDir, 'no-duration.mkv');
+  soundVideo = join(fixtureDir, 'sound.mp4');
   const encode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
   await execFileAsync(ffmpegPath, [
     '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x36:rate=10', ...encode, smallVideo,
+  ]);
+  await execFileAsync(ffmpegPath, [
+    '-f', 'lavfi', '-i', 'testsrc=duration=1:size=64x36:rate=10',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+    ...encode, '-c:a', 'aac', '-shortest', soundVideo,
   ]);
   await execFileAsync(ffmpegPath, [
     '-f', 'lavfi', '-i', 'testsrc=duration=1:size=1920x1080:rate=10', ...encode, largeVideo,
@@ -161,6 +168,13 @@ describe('probeFile', () => {
     expect(probe.nativeHeight).toBe(64);
   });
 
+  it('reports hasAudio for a file with an audio track and not for a silent one', async () => {
+    const withSound = await probeFile(soundVideo);
+    expect(withSound.hasAudio).toBe(true);
+    const silent = await probeFile(smallVideo);
+    expect(silent.hasAudio).toBe(false);
+  });
+
   it('measures duration when the container header lacks one', async () => {
     const probe = await probeFile(noDurationVideo);
     expect(probe.durationMs).toBeGreaterThanOrEqual(900);
@@ -191,6 +205,13 @@ describe('createFfmpegSource', () => {
     expect(info.colorSpace).toBe('rgb24');
     expect(info.fps).toBe(10);
     expect(info.durationMs).toBeGreaterThanOrEqual(1_900);
+    await source.close();
+  });
+
+  it('surfaces hasAudio on the source info', async () => {
+    const source = createFfmpegSource({ filePath: soundVideo });
+    const info = await source.open();
+    expect(info.hasAudio).toBe(true);
     await source.close();
   });
 

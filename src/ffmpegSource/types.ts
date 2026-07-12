@@ -23,6 +23,8 @@ export interface ProbeResult {
   durationMs: number;
   /** Native frame rate */
   fps: number;
+  /** True when the container also carries an audio stream */
+  hasAudio: boolean;
 }
 
 /** Decode dimensions fitted within the MAX_DECODE_* caps */

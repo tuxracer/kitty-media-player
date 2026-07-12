@@ -138,6 +138,7 @@ export const createFfmpegSource = (options: FfmpegSourceOptions): FrameSource =>
       colorSpace: 'rgb24',
       durationMs: probe.durationMs,
       fps: probe.fps,
+      hasAudio: probe.hasAudio,
     };
     // A close() that lands during the probe await must not leak a decoder
     // process that nothing will ever kill

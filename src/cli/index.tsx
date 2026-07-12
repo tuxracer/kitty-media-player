@@ -102,27 +102,44 @@ if (fallback) {
 const source: FrameSource =
   args.file === undefined ? createProceduralSource() : createFfmpegSource({ filePath: args.file });
 
-let info: FrameSourceInfo;
-try {
-  info = await source.open();
-} catch (error) {
-  const message = isFfmpegSourceError(error) ? error.message : String(error);
-  process.stderr.write(`kitty-video-player: ${message}\n`);
-  process.exit(EXIT_USAGE);
-}
-
 // Only file playback has audio. The procedural demo is silent, and a file
 // whose audio cannot play (no stream, no device) resolves hasAudio false
 // and is closed again, so the players below see null and skip every call.
-let audio: AudioPlayer | null = null;
-if (args.file !== undefined) {
-  const audioPlayer = createFfmpegAudioPlayer({ filePath: args.file });
+// The audio player opens in parallel with the video source and reads the
+// has-audio bit from the video probe's result, so startup runs one ffprobe
+// and the audio device open hides behind the video open.
+const openingSource = source.open();
+const audioPlayer =
+  args.file === undefined
+    ? null
+    : createFfmpegAudioPlayer({
+        filePath: args.file,
+        probeAudio: async () => (await openingSource).hasAudio ?? false,
+      });
+
+// Resolves the opened player or null, never rejects (audio problems mean
+// silent playback)
+const openAudio = async (): Promise<AudioPlayer | null> => {
+  if (audioPlayer === null) {
+    return null;
+  }
   const { hasAudio } = await audioPlayer.open();
   if (hasAudio) {
-    audio = audioPlayer;
-  } else {
-    await audioPlayer.close();
+    return audioPlayer;
   }
+  await audioPlayer.close();
+  return null;
+};
+
+let info: FrameSourceInfo;
+let audio: AudioPlayer | null = null;
+try {
+  [info, audio] = await Promise.all([openingSource, openAudio()]);
+} catch (error) {
+  await audioPlayer?.close().catch(() => undefined);
+  const message = isFfmpegSourceError(error) ? error.message : String(error);
+  process.stderr.write(`kitty-video-player: ${message}\n`);
+  process.exit(EXIT_USAGE);
 }
 
 // Fallback mode never touches Ink. The renderer owns the whole screen

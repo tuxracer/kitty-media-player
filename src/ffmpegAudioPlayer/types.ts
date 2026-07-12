@@ -6,6 +6,12 @@ export interface FfmpegAudioPlayerOptions {
   filePath: string;
   /** Injectable device factory (the audify RtAudio adapter in production) */
   createDevice?: CreateAudioDevice;
+  /**
+   * Injectable has-audio probe, probeHasAudio by default. The players pass
+   * a reader of the video probe's result here, so one ffprobe run serves
+   * both pipelines. A rejection means silent playback, never a crash.
+   */
+  probeAudio?: () => Promise<boolean>;
 }
 
 export interface AudioDeviceOptions {

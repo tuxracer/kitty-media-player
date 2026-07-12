@@ -35,7 +35,11 @@ export { createRtAudioDevice } from './rtAudioDevice.ts';
  * device exists to complain about) and the player plays silent video.
  */
 export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): AudioPlayer => {
-  const { filePath, createDevice = createRtAudioDevice } = options;
+  const {
+    filePath,
+    createDevice = createRtAudioDevice,
+    probeAudio = () => probeHasAudio(filePath),
+  } = options;
 
   let device: AudioDevice | null = null;
   let decoder: AudioDecoder | null = null;
@@ -177,7 +181,13 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
       // instead of opening (and leaking) a second device
       return { hasAudio: true };
     }
-    const hasStream = await probeHasAudio(filePath);
+    let hasStream = false;
+    try {
+      hasStream = await probeAudio();
+    } catch {
+      // An injected probe may reject (a failed shared video probe), which
+      // means silent playback, never a crash
+    }
     if (!hasStream || ffmpegPath === null || closed) {
       return { hasAudio: false };
     }

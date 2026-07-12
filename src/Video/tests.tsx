@@ -928,9 +928,13 @@ describe('Video managed-mode audio', () => {
       <Video src="/some/file.mp4" width={20} height={10} autoPlay keyboard />,
     );
     await flush();
-    expect(ffmpegAudioMocks.createFfmpegAudioPlayer).toHaveBeenCalledWith({
-      filePath: '/some/file.mp4',
-    });
+    expect(ffmpegAudioMocks.createFfmpegAudioPlayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filePath: '/some/file.mp4',
+        // The video probe's result is shared into the audio player
+        probeAudio: expect.any(Function),
+      }),
+    );
     expect(audio.playFroms[0]).toBe(0);
     stdin.write('m');
     await flush();

@@ -60,7 +60,16 @@ export const useManagedResources = ({
       return;
     }
     const source: FrameSource = srcObject ?? createFfmpegSource({ filePath: src ?? '' });
-    const audioPlayer = src === undefined ? null : createFfmpegAudioPlayer({ filePath: src });
+    // The audio player reads the has-audio bit from the video probe's
+    // result, so the load runs one ffprobe and the two opens overlap
+    const openingSource = source.open();
+    const audioPlayer =
+      src === undefined
+        ? null
+        : createFfmpegAudioPlayer({
+            filePath: src,
+            probeAudio: async () => (await openingSource).hasAudio ?? false,
+          });
     let cancelled = false;
     setResources(IDLE);
 
@@ -82,7 +91,7 @@ export const useManagedResources = ({
       return null;
     };
 
-    void Promise.all([source.open(), openAudio()])
+    void Promise.all([openingSource, openAudio()])
       .then(([info, audio]) => {
         if (cancelled) {
           return;

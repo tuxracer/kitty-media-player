@@ -11,6 +11,12 @@ export interface FrameSourceInfo {
   durationMs: number;
   /** Native frame rate, drives the playback tick interval */
   fps: number;
+  /**
+   * True when the container also carries an audio stream. Sources that read
+   * real media set it (the ffmpeg source does), synthetic sources may omit
+   * it. Absent means unknown, treated as no audio.
+   */
+  hasAudio?: boolean;
 }
 
 export interface FrameSource {
