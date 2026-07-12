@@ -2,6 +2,20 @@ import type { ReactNode } from 'react';
 
 import type { AudioPlayer } from '../audioPlayer/index.ts';
 
+export type AudioErrorCode = 'NO_AUDIO_STREAM' | 'AUDIO_UNAVAILABLE';
+
+export class AudioError extends Error {
+  readonly code: AudioErrorCode;
+
+  constructor(code: AudioErrorCode) {
+    super(code);
+    this.name = 'AudioError';
+    this.code = code;
+  }
+}
+
+export const isAudioError = (error: unknown): error is AudioError => error instanceof AudioError;
+
 export interface AudioTimeUpdateEvent {
   currentTime: number;
   duration: number;
@@ -9,6 +23,20 @@ export interface AudioTimeUpdateEvent {
 
 export interface AudioLoadedMetadataEvent {
   duration: number;
+}
+
+export type ManagedAudioStatus = 'loading' | 'error' | 'ready';
+
+export interface ManagedAudioResources {
+  status: ManagedAudioStatus;
+  audio: AudioPlayer | null;
+  durationMs: number | null;
+}
+
+export interface ManagedAudioResourcesOptions {
+  src: string;
+  onLoadedMetadata?: (event: AudioLoadedMetadataEvent) => void;
+  onError?: (error: unknown) => void;
 }
 
 export interface AudioPlaybackCallbacks {
