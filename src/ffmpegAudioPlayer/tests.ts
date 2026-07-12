@@ -8,13 +8,15 @@ import ffmpegPath from 'ffmpeg-static';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AUDIO_UNAVAILABLE_MESSAGE,
   RTAUDIO_FORMAT_SINT16,
   SAMPLE_RATE,
   VOLUME_MUTED,
 } from './consts.ts';
-import { createRtAudioDevice } from './rtAudioDevice.ts';
-import type { AudioDeviceOptions } from './types.ts';
+import { createFfmpegAudioPlayer } from './index.ts';
 import { probeHasAudio } from './probe.ts';
+import { createRtAudioDevice } from './rtAudioDevice.ts';
+import type { AudioDevice, AudioDeviceOptions, CreateAudioDevice } from './types.ts';
 
 // The fake audify module mirrors the real one's CJS default-export interop
 // shape. It is hoisted so vi.mock can reference it.
@@ -178,5 +180,106 @@ describe('probeHasAudio', () => {
 
   it('reports false for a non-media file instead of throwing', async () => {
     await expect(probeHasAudio(notMedia)).resolves.toBe(false);
+  });
+});
+
+interface FakeDeviceHarness {
+  written: Buffer[];
+  clearQueueCalls: number;
+  volumes: number[];
+  closeCalls: number;
+  createCalls: number;
+  /** Simulates the device playing count queued frames (fires onFrameDone) */
+  playFrames: (count: number) => void;
+  createDevice: CreateAudioDevice;
+}
+
+const FAKE_FRAME_SIZE = 1_024;
+
+const createFakeDeviceFactory = (available = true): FakeDeviceHarness => {
+  let onFrameDone: () => void = () => undefined;
+  const harness: FakeDeviceHarness = {
+    written: [],
+    clearQueueCalls: 0,
+    volumes: [],
+    closeCalls: 0,
+    createCalls: 0,
+    playFrames: (count) => {
+      for (let i = 0; i < count; i++) {
+        onFrameDone();
+      }
+    },
+    createDevice: (options) => {
+      harness.createCalls += 1;
+      if (!available) {
+        return Promise.resolve(null);
+      }
+      onFrameDone = options.onFrameDone;
+      const device: AudioDevice = {
+        frameSize: FAKE_FRAME_SIZE,
+        write: (pcm) => {
+          harness.written.push(Buffer.from(pcm));
+        },
+        clearQueue: () => {
+          harness.clearQueueCalls += 1;
+        },
+        setVolume: (volume) => {
+          harness.volumes.push(volume);
+        },
+        close: () => {
+          harness.closeCalls += 1;
+        },
+      };
+      return Promise.resolve(device);
+    },
+  };
+  return harness;
+};
+
+describe('createFfmpegAudioPlayer open and close', () => {
+  it('opens with hasAudio for a file with an audio stream', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await expect(player.open()).resolves.toEqual({ hasAudio: true });
+    expect(fake.createCalls).toBe(1);
+    await player.close();
+  });
+
+  it('opens silent for a file without an audio stream and never touches the device', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: silentVideo, createDevice: fake.createDevice });
+    await expect(player.open()).resolves.toEqual({ hasAudio: false });
+    expect(fake.createCalls).toBe(0);
+    await player.close();
+  });
+
+  it('degrades to silent with one stderr notice when no device is available', async () => {
+    const fake = createFakeDeviceFactory(false);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+      await expect(player.open()).resolves.toEqual({ hasAudio: false });
+      const notices = stderrSpy.mock.calls.filter(([text]) =>
+        String(text).includes(AUDIO_UNAVAILABLE_MESSAGE),
+      );
+      expect(notices).toHaveLength(1);
+      // Every later call is a no-op, not a crash
+      player.playFrom(0);
+      player.pause();
+      player.setMuted(true);
+      expect(player.getPositionMs()).toBeNull();
+      await player.close();
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('close is idempotent and closes the device', async () => {
+    const fake = createFakeDeviceFactory();
+    const player = createFfmpegAudioPlayer({ filePath: withAudio, createDevice: fake.createDevice });
+    await player.open();
+    await player.close();
+    await player.close();
+    expect(fake.closeCalls).toBe(1);
   });
 });
