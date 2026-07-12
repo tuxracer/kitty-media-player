@@ -16,6 +16,7 @@ A terminal video player. The UI (title, progress bar, controls) is an [Ink](http
 ```sh
 npx kitty-video-player
 npx kitty-video-player movie.mp4
+npx kitty-video-player https://example.com/movie.mp4
 ```
 
 Or install globally:
@@ -34,7 +35,8 @@ pnpm dev
 
 ## Current status
 
-kitty-video-player plays video files (`kitty-video-player movie.mp4`) through a bundled ffmpeg,
+kitty-video-player plays video files (`kitty-video-player movie.mp4`) and http(s)
+URLs (`kitty-video-player https://example.com/movie.mp4`) through a bundled ffmpeg,
 decoded as a stream at a capped resolution with seek and pause. Files play
 their audio track too, through a second bundled ffmpeg process and a native
 audio device (audify/RtAudio), and degrade to silent video when no audio
@@ -55,7 +57,7 @@ procedural demo clip, a hue-cycling ball moving on a Lissajous path over a
 
 | Flag                   | Action                                                                                                                                                                                                                           |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<file>`               | play this video file (optional, plays the built-in demo when omitted)                                                                                                                                                            |
+| `<file>` or `<url>`    | play this video file or http(s) URL (optional, plays the built-in demo when omitted)                                                                                                                                             |
 | `-h`, `--help`         | print help and exit                                                                                                                                                                                                              |
 | `-v`, `--version`      | print the version and exit                                                                                                                                                                                                       |
 | `--fallback`           | play without the Ink UI using the best available renderer (kitty graphics without controls when supported, otherwise a cell renderer)                                                                                            |

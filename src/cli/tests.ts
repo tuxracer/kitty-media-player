@@ -40,6 +40,15 @@ describe('parseCliArgs', () => {
     });
   });
 
+  it('passes an http(s) URL positional through as the file', () => {
+    expect(parseCliArgs(['https://example.com/movie.mp4'])).toEqual({
+      action: 'play',
+      file: 'https://example.com/movie.mp4',
+      fallback: false,
+      muted: false,
+    });
+  });
+
   it('returns play with fallback for --fallback', () => {
     expect(parseCliArgs(['--fallback'])).toEqual({ action: 'play', fallback: true, muted: false });
   });

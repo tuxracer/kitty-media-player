@@ -29,6 +29,7 @@ export const HELP_TEXT = `kitty-video-player, a terminal video player (Ink UI wi
 Usage:
   kitty-video-player            play the built-in procedural demo
   kitty-video-player <file>     play a video file (decoded with the bundled ffmpeg)
+  kitty-video-player <url>      play a video from an http(s) URL
 
 Options:
   -h, --help              print this help and exit

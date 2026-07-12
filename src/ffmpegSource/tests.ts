@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
-import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import ffmpegPath from 'ffmpeg-static';
@@ -314,6 +316,95 @@ describe('createFfmpegSource', () => {
     expect(info.height).toBe(64);
     const frame = await waitForFrame(source, 0);
     expect(frame.length).toBe(36 * 64 * RGB_CHANNELS);
+    await source.close();
+  });
+});
+
+describe('http(s) URL sources', () => {
+  const HTTP_OK = 200;
+  const HTTP_PARTIAL_CONTENT = 206;
+  const HTTP_NOT_FOUND = 404;
+
+  // Serves the fixture files over a real local HTTP server with byte-range
+  // support, which ffmpeg's http reader uses to seek. Fixtures are tiny, so
+  // each request just reads the whole file and slices.
+  let fixtureServer: Server;
+  let fixtureBaseUrl: string;
+
+  beforeAll(async () => {
+    fixtureServer = createServer((request, response) => {
+      void (async () => {
+        let data: Buffer;
+        try {
+          data = await readFile(join(fixtureDir, basename(request.url ?? '')));
+        } catch {
+          response.writeHead(HTTP_NOT_FOUND);
+          response.end();
+          return;
+        }
+        const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? '');
+        if (range === null) {
+          response.writeHead(HTTP_OK, {
+            'Accept-Ranges': 'bytes',
+            'Content-Length': data.length,
+          });
+          response.end(data);
+          return;
+        }
+        const start = Number(range[1]);
+        const end = range[2] === '' ? data.length - 1 : Math.min(Number(range[2]), data.length - 1);
+        response.writeHead(HTTP_PARTIAL_CONTENT, {
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': end - start + 1,
+        });
+        response.end(data.subarray(start, end + 1));
+      })();
+    });
+    await new Promise<void>((resolve) => fixtureServer.listen(0, '127.0.0.1', resolve));
+    const address = fixtureServer.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('fixture server reported no port');
+    }
+    fixtureBaseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterAll(async () => {
+    // SIGKILLed decoders can leave sockets open, so drop them before close
+    fixtureServer.closeAllConnections();
+    await new Promise<void>((resolve, reject) => {
+      fixtureServer.close((error) => (error === undefined ? resolve() : reject(error)));
+    });
+  });
+
+  it('probes a URL without requiring a local file', async () => {
+    const probe = await probeFile(`${fixtureBaseUrl}/${basename(smallVideo)}`);
+    expect(probe.nativeWidth).toBe(64);
+    expect(probe.nativeHeight).toBe(36);
+    expect(probe.fps).toBe(10);
+    expect(probe.durationMs).toBeGreaterThanOrEqual(1_900);
+  });
+
+  it('rejects an unreachable URL with PROBE_FAILED, not FILE_NOT_FOUND', async () => {
+    // Port 1 is privileged and unbound, so the connection is refused fast
+    await expectCode(probeFile('http://127.0.0.1:1/missing.mp4'), 'PROBE_FAILED');
+  });
+
+  it('serves frames from a URL', async () => {
+    const source = createFfmpegSource({ filePath: `${fixtureBaseUrl}/${basename(smallVideo)}` });
+    const info = await source.open();
+    const frame = await waitForFrame(source, 0);
+    expect(frame.length).toBe(info.width * info.height * RGB_CHANNELS);
+    await source.close();
+  });
+
+  it('seeks a URL to the same frame sequential playback reaches', async () => {
+    const source = createFfmpegSource({ filePath: `${fixtureBaseUrl}/${basename(smallVideo)}` });
+    await source.open();
+    const sequential = await waitForFrame(source, 1_500);
+    await source.seek(1_500);
+    const sought = await waitForFrame(source, 1_500);
+    expect(sought).toEqual(sequential);
     await source.close();
   });
 });

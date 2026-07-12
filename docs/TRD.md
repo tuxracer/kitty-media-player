@@ -23,8 +23,10 @@ tests can import it without executing the entry.
 2. Guard on terminal capability. If stdout is not a TTY, print a notice and
    exit 0 (CI-friendly, nothing is drawn).
 3. Resolve the render path (see below).
-4. Open the `FrameSource`. A file argument opens `ffmpegSource`, no argument
-   opens the built-in `proceduralSource`.
+4. Open the `FrameSource`. A file or http(s) URL argument opens
+   `ffmpegSource` (ffprobe and ffmpeg read both directly, only the local
+   existence check is skipped for URLs), no argument opens the built-in
+   `proceduralSource`.
 5. Run the full player or the fallback player.
 
 ### Render path resolution

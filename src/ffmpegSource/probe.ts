@@ -6,6 +6,7 @@ import ffmpegPath from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 
 import { isRecord } from '../isRecord/index.ts';
+import { isRemoteUrl } from '../isRemoteUrl/index.ts';
 import {
   HALF_ROTATION_DEGREES,
   MAX_DECODE_HEIGHT,
@@ -115,14 +116,19 @@ const measureDurationMs = async (filePath: string): Promise<number | null> => {
 /**
  * Reads the first video stream's metadata with ffprobe. Live-muxed files
  * without a header duration get theirs measured by a stream-copy scan.
- * Rejects with FfmpegSourceError: FILE_NOT_FOUND, PROBE_FAILED (unreadable
- * media or missing metadata), or NO_VIDEO_STREAM.
+ * Accepts local paths and http(s) URLs (ffprobe and ffmpeg read both), so
+ * the existence check only applies to paths and an unreachable URL surfaces
+ * as PROBE_FAILED with ffprobe's network error as the detail. Rejects with
+ * FfmpegSourceError: FILE_NOT_FOUND, PROBE_FAILED (unreadable media or
+ * missing metadata), or NO_VIDEO_STREAM.
  */
 export const probeFile = async (filePath: string): Promise<ProbeResult> => {
-  try {
-    await access(filePath);
-  } catch {
-    throw new FfmpegSourceError('FILE_NOT_FOUND', `${filePath}: no such file`);
+  if (!isRemoteUrl(filePath)) {
+    try {
+      await access(filePath);
+    } catch {
+      throw new FfmpegSourceError('FILE_NOT_FOUND', `${filePath}: no such file`);
+    }
   }
 
   let stdout: string;
