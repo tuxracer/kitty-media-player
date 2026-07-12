@@ -4,6 +4,7 @@ import { createRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioPlayer } from '../audioPlayer/index.ts';
+import type { FfmpegAudioPlayerOptions } from '../ffmpegAudioPlayer/index.ts';
 import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
 import { createProceduralSource } from '../proceduralSource/index.ts';
 import {
@@ -899,6 +900,10 @@ describe('Video mute', () => {
   });
 });
 
+/** Narrows the mock's captured call arguments back to the options shape */
+const isPlayerOptions = (value: unknown): value is FfmpegAudioPlayerOptions =>
+  typeof value === 'object' && value !== null && 'filePath' in value;
+
 describe('Video managed-mode audio', () => {
   const INFO: FrameSourceInfo = {
     width: 8,
@@ -919,7 +924,7 @@ describe('Video managed-mode audio', () => {
   });
 
   it('creates and opens an audio player for a src file and mutes it via the m key', async () => {
-    const videoSource = createFakeSource(INFO);
+    const videoSource = createFakeSource({ ...INFO, hasAudio: true });
     ffmpegSourceMocks.createFfmpegSource.mockReturnValue(videoSource.source);
     const audio = createFakeAudio();
     ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(audio.audio);
@@ -928,13 +933,17 @@ describe('Video managed-mode audio', () => {
       <Video src="/some/file.mp4" width={20} height={10} autoPlay keyboard />,
     );
     await flush();
-    expect(ffmpegAudioMocks.createFfmpegAudioPlayer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        filePath: '/some/file.mp4',
-        // The video probe's result is shared into the audio player
-        probeAudio: expect.any(Function),
-      }),
-    );
+    expect(ffmpegAudioMocks.createFfmpegAudioPlayer).toHaveBeenCalledWith({
+      filePath: '/some/file.mp4',
+      probeAudio: expect.any(Function),
+    });
+    // The probeAudio closure shares the video probe's result: it must read
+    // hasAudio from the source's already-resolved open()
+    const options: unknown = ffmpegAudioMocks.createFfmpegAudioPlayer.mock.calls[0][0];
+    if (!isPlayerOptions(options)) {
+      throw new Error('createFfmpegAudioPlayer was called without options');
+    }
+    await expect(options.probeAudio?.()).resolves.toBe(true);
     expect(audio.playFroms[0]).toBe(0);
     stdin.write('m');
     await flush();
@@ -960,6 +969,13 @@ describe('Video managed-mode audio', () => {
     );
     await flush();
     expect(audio.playFroms).toHaveLength(0);
+    // A source info without hasAudio reads as no audio through the shared
+    // probe closure
+    const options: unknown = ffmpegAudioMocks.createFfmpegAudioPlayer.mock.calls[0][0];
+    if (!isPlayerOptions(options)) {
+      throw new Error('createFfmpegAudioPlayer was called without options');
+    }
+    await expect(options.probeAudio?.()).resolves.toBe(false);
     unmount();
   });
 

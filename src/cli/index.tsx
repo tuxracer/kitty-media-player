@@ -117,8 +117,9 @@ const audioPlayer =
         probeAudio: async () => (await openingSource).hasAudio ?? false,
       });
 
-// Resolves the opened player or null, never rejects (audio problems mean
-// silent playback)
+// Resolves the opened player or null, never rejects: AudioPlayer.open()
+// and close() resolve on every failure by contract, so no try/catch is
+// needed around them here
 const openAudio = async (): Promise<AudioPlayer | null> => {
   if (audioPlayer === null) {
     return null;
