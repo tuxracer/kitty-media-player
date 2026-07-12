@@ -502,7 +502,10 @@ describe('createFfmpegAudioPlayer playback', () => {
     await player.open();
     expect(player.getPositionMs()).toBeNull();
     player.playFrom(500);
-    expect(player.getPositionMs()).toBe(500);
+    // No sound has played yet, so there is no audible position. Reporting
+    // the frozen start offset here is what made the clock's drift snap
+    // kill slow-starting (remote) decoders every second.
+    expect(player.getPositionMs()).toBeNull();
     await waitFor(() => fake.written.length >= 10);
     fake.playFrames(10);
     const frameMs = (FAKE_FRAME_SIZE / SAMPLE_RATE) * 1_000;
@@ -547,8 +550,9 @@ describe('createFfmpegAudioPlayer playback', () => {
     try {
       await expect(player.open()).resolves.toEqual({ hasAudio: true });
       player.playFrom(500);
-      expect(player.getPositionMs()).toBe(500);
       await waitFor(() => fake.written.length >= 3);
+      fake.playFrames(1);
+      expect(player.getPositionMs()).toBeGreaterThanOrEqual(500);
     } finally {
       await player.close();
       server.closeAllConnections();
@@ -567,8 +571,12 @@ describe('createFfmpegAudioPlayer playback', () => {
     player.playFrom(1_000);
     // Both playFrom calls clear the queue for a fresh start
     expect(fake.clearQueueCalls).toBe(2);
-    expect(player.getPositionMs()).toBe(1_000);
-    await waitFor(() => fake.written.length >= 1);
+    const writtenBefore = fake.written.length;
+    await waitFor(() => fake.written.length > writtenBefore);
+    fake.playFrames(1);
+    // At least the offset (plus the learned startup latency and the one
+    // played frame, both machine-dependent)
+    expect(player.getPositionMs()).toBeGreaterThanOrEqual(1_000);
     await player.close();
   });
 
@@ -581,7 +589,8 @@ describe('createFfmpegAudioPlayer playback', () => {
     player.setMuted(false);
     // open() applied full volume once, then the two toggles
     expect(fake.volumes).toEqual([1, 0, 1]);
-    expect(player.getPositionMs()).toBe(0);
+    // The feed keeps running through the toggles
+    await waitFor(() => fake.written.length >= 1);
     await player.close();
   });
 
@@ -601,9 +610,11 @@ describe('createFfmpegAudioPlayer playback', () => {
     player.playFrom(0);
 
     // Some frames arrive and queue up (the queue cap holds off the rest)
-    // before anything has played, so a backlog exists. Position must still
-    // advance normally here, whether or not the decoder has already exited.
+    // before anything has played, so a backlog exists. Once sound has
+    // started playing, position must report normally, whether or not the
+    // decoder has already exited.
     await waitFor(() => fake.written.length >= 10);
+    fake.playFrames(1);
     expect(player.getPositionMs()).not.toBeNull();
 
     // Drain everything the decoder has queued or will queue, repeatedly,

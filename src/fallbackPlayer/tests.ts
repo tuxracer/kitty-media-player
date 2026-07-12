@@ -476,6 +476,16 @@ describe('runFallbackPlayer audio', () => {
     await quit(state);
   });
 
+  it('leaves audio alone while it reports no position (still spinning up)', async () => {
+    const audio = createFakeAudio();
+    const state = setup(audio);
+    // positionMs stays null, like a remote decoder that has produced no
+    // sound yet: the drift snap must not respawn it
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    expect(audio.playFroms).toEqual([0]);
+    await quit(state);
+  });
+
   it('leaves audio alone when drift stays under the threshold', async () => {
     const audio = createFakeAudio();
     const state = setup(audio);

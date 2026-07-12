@@ -29,12 +29,23 @@ export { createRtAudioDevice } from './rtAudioDevice.ts';
 /**
  * Creates an AudioPlayer decoding a file's audio track with the bundled
  * ffmpeg into an audify (RtAudio) output stream. One ffmpeg process per
- * playFrom decodes s16le PCM from an input-side -ss offset, mirroring the
- * video decoder's respawn-on-seek pattern. pause kills the decoder and
- * clears the device queue, so resume is always a fresh playFrom at the
- * playhead and sync is exact after every transition. Audio problems never
- * reject: open resolves hasAudio false (with a one-time notice when a
- * device exists to complain about) and the player plays silent video.
+ * playFrom decodes s16le PCM from an -ss offset (placed by the video
+ * decoder's seekability rules), mirroring the respawn-on-seek pattern.
+ * pause kills the decoder and clears the device queue, so resume is always
+ * a fresh playFrom at the playhead and sync is exact after every
+ * transition. Audio problems never reject: open resolves hasAudio false
+ * (with a one-time notice when a device exists to complain about) and the
+ * player plays silent video.
+ *
+ * A decoder takes time to produce its first sound (near zero for local
+ * files, seconds for remote streams), and the video clock keeps running
+ * through it. Two measures keep that startup from breaking sync. Until the
+ * current decoder's sound actually plays, getPositionMs reports null, so
+ * the clock's drift snap leaves a starting decoder alone instead of
+ * killing it every second (which silenced remote playback entirely). And
+ * playFrom aims past the requested time by the last measured
+ * spawn-to-first-sound latency, so when the sound arrives it lands where
+ * the clock has advanced to instead of permanently behind it.
  */
 export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): AudioPlayer => {
   const {
@@ -63,6 +74,10 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
   // position. Both reset on every playFrom and pause.
   let framesWritten = 0;
   let framesPlayed = 0;
+
+  // Wall-clock time the last decoder took from spawn to its first PCM,
+  // learned per spawn. playFrom aims past its target by this much.
+  let startLatencyMs = 0;
 
   const frameBytes = (activeDevice: AudioDevice): number =>
     activeDevice.frameSize * CHANNELS * BYTES_PER_SAMPLE;
@@ -125,6 +140,8 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
 
     const current: AudioDecoder = { startMs, killed: false, ended: false, child };
     const bytes = frameBytes(activeDevice);
+    const spawnedAtMs = Date.now();
+    let firstPcmSeen = false;
 
     // Chunks accumulate until at least one whole device frame arrived, then
     // a single concat slices out every complete frame, the same batching the
@@ -137,6 +154,10 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     child.stdout.on('data', (chunk: Buffer) => {
       if (current.killed) {
         return;
+      }
+      if (!firstPcmSeen) {
+        firstPcmSeen = true;
+        startLatencyMs = Date.now() - spawnedAtMs;
       }
       pendingChunks.push(chunk);
       pendingBytes += chunk.length;
@@ -233,7 +254,12 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
     device.clearQueue();
     framesWritten = 0;
     framesPlayed = 0;
-    decoder = spawnDecoder(timeMs, device);
+    // Aim past the target by the learned startup latency: the clock keeps
+    // running while the decoder spins up, so by the time sound comes out
+    // the playhead is about startLatencyMs past timeMs. Aiming at timeMs
+    // itself would start the audio permanently behind, and the drift snap
+    // would respawn it forever chasing a gap that never closes.
+    decoder = spawnDecoder(timeMs + startLatencyMs, device);
   };
 
   const pause = (): void => {
@@ -255,6 +281,13 @@ export const createFfmpegAudioPlayer = (options: FfmpegAudioPlayerOptions): Audi
 
   const getPositionMs = (): number | null => {
     if (closed || device === null || decoder === null) {
+      return null;
+    }
+    // No sound has come out of this decoder yet (still spinning up after
+    // playFrom): there is no audible position, and reporting the frozen
+    // start offset would make the clock's drift snap kill a decoder that
+    // just needs time to deliver
+    if (framesPlayed === 0) {
       return null;
     }
     if (decoder.ended && framesPlayed >= framesWritten) {

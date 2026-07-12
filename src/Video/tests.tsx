@@ -720,6 +720,24 @@ describe('Video audio wiring', () => {
     unmount();
   });
 
+  it('leaves audio alone while it reports no position (still spinning up)', async () => {
+    const { harness, source, info } = await setup();
+    const audio = createFakeAudio();
+    const { unmount } = render(
+      <Video screen={harness.screen} source={source} info={info} audio={audio.audio} autoPlay keyboard />,
+    );
+    await flush();
+    // A null position means the player has produced no sound yet (a remote
+    // decoder can take seconds). The drift snap must not respawn it, or a
+    // slow-starting decoder gets killed every second and never plays.
+    audio.positionMs = null;
+    const playsBefore = audio.playFroms.length;
+    await delay(1_300);
+    await flush();
+    expect(audio.playFroms.length).toBe(playsBefore);
+    unmount();
+  });
+
   it('leaves audio alone when drift stays under the threshold', async () => {
     const { harness, source, info } = await setup();
     const audio = createFakeAudio();

@@ -109,7 +109,15 @@ sound starts where the picture actually resumed. The
 video clock stays master. Once per displayed second it compares the audio
 player's reported position against its own elapsed time and calls `playFrom`
 again if they have drifted more than `DRIFT_RESYNC_THRESHOLD_MS` (250 ms)
-apart. Audio problems never interrupt playback. A missing audio track, a
+apart. A null position means the player has nothing audible to report (not
+playing, drained, or a fresh decoder that has produced no sound yet) and
+the clock leaves it alone. That last case matters for remote streams: a
+decoder can take seconds to deliver its first sample, and snapping during
+that window would kill and respawn it every second, forever, playing
+nothing. The ffmpeg player also aims each `playFrom` past the requested
+time by its last measured spawn-to-first-sound latency, so when the sound
+arrives it lands where the running clock is instead of permanently behind
+it. Audio problems never interrupt playback. A missing audio track, a
 missing output device, or a decoder crash all degrade to silent video
 instead of an error.
 
