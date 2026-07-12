@@ -74,8 +74,7 @@ export const Video = forwardRef<VideoRef, VideoProps>((props, ref): ReactElement
   const screen = props.screen === undefined ? managed.screen : props.screen;
   const source = props.screen === undefined ? managed.source : props.source;
   const info = props.screen === undefined ? managed.info : props.info;
-  // Managed audio arrives in Task 9, so managed mode passes null for now.
-  const audio = props.screen === undefined ? null : (props.audio ?? null);
+  const audio = props.screen === undefined ? managed.audio : (props.audio ?? null);
 
   const [placeholderRows, setPlaceholderRows] = useState<string[]>(() =>
     props.screen === undefined ? [] : props.screen.getPlaceholderRows(),

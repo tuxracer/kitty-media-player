@@ -23,7 +23,17 @@ const managedScreenMocks = vi.hoisted(() => ({
   createManagedScreen: vi.fn(),
 }));
 
+const ffmpegSourceMocks = vi.hoisted(() => ({
+  createFfmpegSource: vi.fn(),
+}));
+
+const ffmpegAudioMocks = vi.hoisted(() => ({
+  createFfmpegAudioPlayer: vi.fn(),
+}));
+
 vi.mock('./managedScreen.ts', () => managedScreenMocks);
+vi.mock('../ffmpegSource/index.ts', () => ffmpegSourceMocks);
+vi.mock('../ffmpegAudioPlayer/index.ts', () => ffmpegAudioMocks);
 
 // Let queued microtasks and immediates settle (getFrameAt/seek promise chains)
 const flush = async (): Promise<void> => {
@@ -813,6 +823,75 @@ describe('Video mute', () => {
     await flush();
     expect(ref.current?.muted).toBe(true);
     expect(audio.mutedValues.at(-1)).toBe(true);
+    unmount();
+  });
+});
+
+describe('Video managed-mode audio', () => {
+  const INFO: FrameSourceInfo = {
+    width: 8,
+    height: 4,
+    colorSpace: 'rgb24',
+    durationMs: 20_000,
+    fps: 10,
+  };
+
+  beforeEach(() => {
+    managedScreenMocks.canDisplayVideo.mockReturnValue(true);
+    managedScreenMocks.createManagedScreen.mockImplementation(
+      () => createFakeScreen().screen,
+    );
+  });
+
+  it('creates and opens an audio player for a src file and mutes it via the m key', async () => {
+    const videoSource = createFakeSource(INFO);
+    ffmpegSourceMocks.createFfmpegSource.mockReturnValue(videoSource.source);
+    const audio = createFakeAudio();
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(audio.audio);
+
+    const { stdin, unmount } = render(
+      <Video src="/some/file.mp4" width={20} height={10} autoPlay keyboard />,
+    );
+    await flush();
+    expect(ffmpegAudioMocks.createFfmpegAudioPlayer).toHaveBeenCalledWith({
+      filePath: '/some/file.mp4',
+    });
+    expect(audio.playFroms[0]).toBe(0);
+    stdin.write('m');
+    await flush();
+    expect(audio.mutedValues.at(-1)).toBe(true);
+    unmount();
+    // Effect cleanup (where the audio close call lives) is a passive effect,
+    // so it is not flushed synchronously by Ink's unmount(); matches the
+    // flush after unmount() already used elsewhere in this file (e.g.
+    // "disposes the screen and closes the source on unmount").
+    await flush();
+    expect(audio.closeCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('plays silent when the audio player reports no audio', async () => {
+    const videoSource = createFakeSource(INFO);
+    ffmpegSourceMocks.createFfmpegSource.mockReturnValue(videoSource.source);
+    const audio = createFakeAudio();
+    audio.audio.open = () => Promise.resolve({ hasAudio: false });
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(audio.audio);
+
+    const { unmount } = render(
+      <Video src="/some/file.mp4" width={20} height={10} autoPlay />,
+    );
+    await flush();
+    expect(audio.playFroms).toHaveLength(0);
+    unmount();
+  });
+
+  it('creates no audio player for srcObject sources', async () => {
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockClear();
+    const videoSource = createFakeSource(INFO);
+    const { unmount } = render(
+      <Video srcObject={videoSource.source} width={20} height={10} autoPlay />,
+    );
+    await flush();
+    expect(ffmpegAudioMocks.createFfmpegAudioPlayer).not.toHaveBeenCalled();
     unmount();
   });
 });

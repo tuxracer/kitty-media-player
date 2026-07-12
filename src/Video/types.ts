@@ -102,6 +102,8 @@ export interface ManagedResources {
   screen: PlayerScreen | null;
   source: FrameSource | null;
   info: FrameSourceInfo | null;
+  /** Managed audio player, null until ready and null when the file has no usable audio */
+  audio: AudioPlayer | null;
 }
 
 export interface ManagedResourcesOptions {
