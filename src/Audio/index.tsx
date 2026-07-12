@@ -53,11 +53,13 @@ export const Audio = forwardRef<AudioRef, AudioProps>((props, ref): ReactElement
   const dispatchingMetadataRef = useRef(false);
   const metadataTransportRevisionRef = useRef(0);
   const metadataAutoplaySupersededRevisionRef = useRef(0);
+  const hasLoadedMetadataRef = useRef(false);
   const clock = useAudioPlaybackClock({
     audio: managed.audio,
     durationMs: managed.durationMs,
     autoPlay: false,
     loop,
+    startBlocked: true,
     onTimeUpdate,
     onPlay,
     onPause,
@@ -69,6 +71,7 @@ export const Audio = forwardRef<AudioRef, AudioProps>((props, ref): ReactElement
     play: playClock,
     pause: pauseClock,
     seekToMs: seekClockToMs,
+    releaseStart,
     getElapsedMs,
   } = clock;
 
@@ -106,6 +109,7 @@ export const Audio = forwardRef<AudioRef, AudioProps>((props, ref): ReactElement
     if (managed.audio === null || managed.durationMs === null) {
       return;
     }
+    const initialLoad = !hasLoadedMetadataRef.current;
     const transportRevision = metadataTransportRevisionRef.current;
     dispatchingMetadataRef.current = true;
     try {
@@ -113,13 +117,16 @@ export const Audio = forwardRef<AudioRef, AudioProps>((props, ref): ReactElement
     } finally {
       dispatchingMetadataRef.current = false;
     }
+    hasLoadedMetadataRef.current = true;
+    releaseStart();
     if (
+      initialLoad &&
       autoPlayRef.current &&
       metadataAutoplaySupersededRevisionRef.current <= transportRevision
     ) {
       playClock();
     }
-  }, [managed.audio, managed.durationMs, playClock]);
+  }, [managed.audio, managed.durationMs, playClock, releaseStart]);
 
   useImperativeHandle(
     ref,

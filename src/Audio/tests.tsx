@@ -16,6 +16,7 @@ import {
 } from './consts.ts';
 import { AudioError } from './types.ts';
 import type {
+  AudioLoadedMetadataEvent,
   AudioRef,
   AudioPlaybackClock,
   AudioPlaybackClockOptions,
@@ -453,6 +454,91 @@ describe('Audio', () => {
     await flush();
 
     expect(harness.playFroms).toEqual([]);
+    expect(ref.current?.paused).toBe(true);
+    view.unmount();
+  });
+
+  it('applies a replacement metadata seek before starting the new player', async () => {
+    const first = createFakeAudio();
+    const second = createFakeAudio();
+    mediaProbeMocks.probeMediaFile
+      .mockResolvedValueOnce({ kind: 'audio', durationMs: 20_000, coverArt: null })
+      .mockResolvedValueOnce({ kind: 'audio', durationMs: 10_000, coverArt: null });
+    ffmpegAudioMocks.createFfmpegAudioPlayer
+      .mockReturnValueOnce(first.audio)
+      .mockReturnValueOnce(second.audio);
+    const ref = createRef<AudioRef>();
+    const view = render(
+      <Audio
+        ref={ref}
+        src="first.mp3"
+        autoPlay
+        onLoadedMetadata={(event: AudioLoadedMetadataEvent) => {
+          if (event.duration === 10) {
+            ref.current!.currentTime = 5;
+          }
+        }}
+      />,
+    );
+    await flush();
+    expect(first.playFroms).toEqual([0]);
+
+    view.rerender(
+      <Audio
+        ref={ref}
+        src="second.mp3"
+        autoPlay
+        onLoadedMetadata={(event: AudioLoadedMetadataEvent) => {
+          if (event.duration === 10) {
+            ref.current!.currentTime = 5;
+          }
+        }}
+      />,
+    );
+    await flush();
+
+    expect(second.playFroms).toEqual([5_000]);
+    expect(ref.current?.paused).toBe(false);
+    view.unmount();
+  });
+
+  it('lets replacement metadata pause prevent the new player from starting', async () => {
+    const first = createFakeAudio();
+    const second = createFakeAudio();
+    mediaProbeMocks.probeMediaFile
+      .mockResolvedValueOnce({ kind: 'audio', durationMs: 20_000, coverArt: null })
+      .mockResolvedValueOnce({ kind: 'audio', durationMs: 10_000, coverArt: null });
+    ffmpegAudioMocks.createFfmpegAudioPlayer
+      .mockReturnValueOnce(first.audio)
+      .mockReturnValueOnce(second.audio);
+    const ref = createRef<AudioRef>();
+    const onLoadedMetadata = (event: AudioLoadedMetadataEvent): void => {
+      if (event.duration === 10) {
+        ref.current?.pause();
+      }
+    };
+    const view = render(
+      <Audio
+        ref={ref}
+        src="first.mp3"
+        autoPlay
+        onLoadedMetadata={onLoadedMetadata}
+      />,
+    );
+    await flush();
+    expect(first.playFroms).toEqual([0]);
+
+    view.rerender(
+      <Audio
+        ref={ref}
+        src="second.mp3"
+        autoPlay
+        onLoadedMetadata={onLoadedMetadata}
+      />,
+    );
+    await flush();
+
+    expect(second.playFroms).toEqual([]);
     expect(ref.current?.paused).toBe(true);
     view.unmount();
   });

@@ -52,6 +52,7 @@ export interface AudioPlaybackClockOptions extends AudioPlaybackCallbacks {
   durationMs: number | null;
   autoPlay: boolean;
   loop: boolean;
+  startBlocked?: boolean;
 }
 
 export interface AudioPlaybackClock {
@@ -63,6 +64,7 @@ export interface AudioPlaybackClock {
   pause(): void;
   togglePlay(): void;
   seekToMs(targetMs: number): void;
+  releaseStart(): void;
   getElapsedMs(): number;
 }
 

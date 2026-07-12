@@ -8,6 +8,7 @@ export const useAudioPlaybackClock = ({
   durationMs,
   autoPlay,
   loop,
+  startBlocked = false,
   onTimeUpdate,
   onPlay,
   onPause,
@@ -35,6 +36,7 @@ export const useAudioPlaybackClock = ({
   durationRef.current = durationMs;
   const loopRef = useRef(loop);
   loopRef.current = loop;
+  const startBlockedRef = useRef(startBlocked);
 
   const readPlaying = useCallback((): boolean => playingRef.current, []);
 
@@ -106,6 +108,7 @@ export const useAudioPlaybackClock = ({
     callbacksRef.current.onPlay?.();
     if (
       transportRevisionRef.current === transportRevision &&
+      !startBlockedRef.current &&
       audioRef.current !== null &&
       durationRef.current !== null
     ) {
@@ -136,9 +139,9 @@ export const useAudioPlaybackClock = ({
       if (transportRevisionRef.current !== transportRevision) {
         return;
       }
-      if (playingRef.current) {
+      if (playingRef.current && !startBlockedRef.current) {
         startAt(clampedMs);
-      } else {
+      } else if (!playingRef.current) {
         waitingRef.current = false;
         setBuffering(false);
         audioRef.current?.pause();
@@ -147,6 +150,13 @@ export const useAudioPlaybackClock = ({
     [setPlayhead, startAt],
   );
 
+  const releaseStart = useCallback((): void => {
+    startBlockedRef.current = false;
+    if (playingRef.current && audioRef.current !== null && durationRef.current !== null) {
+      startAt(elapsedRef.current);
+    }
+  }, [startAt]);
+
   useEffect(() => {
     elapsedRef.current = 0;
     setElapsedMs(0);
@@ -154,6 +164,7 @@ export const useAudioPlaybackClock = ({
     setEnded(false);
     waitingRef.current = false;
     setBuffering(false);
+    startBlockedRef.current = startBlocked;
 
     if (audio === null || durationMs === null) {
       return () => {
@@ -161,7 +172,7 @@ export const useAudioPlaybackClock = ({
       };
     }
 
-    if (playingRef.current) {
+    if (playingRef.current && !startBlockedRef.current) {
       startAt(0);
     }
 
@@ -234,7 +245,7 @@ export const useAudioPlaybackClock = ({
       clearInterval(interval);
       audio.pause();
     };
-  }, [audio, durationMs, readPlaying, setPlayhead, startAt]);
+  }, [audio, durationMs, readPlaying, setPlayhead, startAt, startBlocked]);
 
   const getElapsedMs = useCallback((): number => elapsedRef.current, []);
 
@@ -251,6 +262,7 @@ export const useAudioPlaybackClock = ({
     pause,
     togglePlay,
     seekToMs,
+    releaseStart,
     getElapsedMs,
   };
 };
