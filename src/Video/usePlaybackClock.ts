@@ -46,6 +46,12 @@ export const usePlaybackClock = ({
   const audioRef = useRef(audio ?? null);
   audioRef.current = audio ?? null;
 
+  // Reads playingRef through a function call because the re-checks after
+  // host callbacks below would otherwise be narrowed away: TypeScript keeps
+  // property narrowing across function calls, but an onPlay/onPause/onEnded
+  // handler can synchronously re-enter the clock and flip the ref.
+  const readPlaying = useCallback((): boolean => playingRef.current, []);
+
   const noteSourceError = useCallback(
     (error: unknown): void => {
       callbacksRef.current.onError?.(error);
@@ -109,8 +115,12 @@ export const usePlaybackClock = ({
     playingRef.current = false;
     setPlaying(false);
     callbacksRef.current.onPause?.();
-    audioRef.current?.pause();
-  }, []);
+    // Re-check: an onPause handler may synchronously re-enter the clock
+    // (e.g. call play()), and then audio must not be silenced afterward.
+    if (!readPlaying()) {
+      audioRef.current?.pause();
+    }
+  }, [readPlaying]);
 
   const play = useCallback((): void => {
     if (endedRef.current) {
@@ -126,8 +136,12 @@ export const usePlaybackClock = ({
     playingRef.current = true;
     setPlaying(true);
     callbacksRef.current.onPlay?.();
-    audioRef.current?.playFrom(elapsedRef.current);
-  }, []);
+    // Re-check: an onPlay handler may synchronously re-enter the clock
+    // (e.g. call pause()), and then audio must not start afterward.
+    if (readPlaying()) {
+      audioRef.current?.playFrom(elapsedRef.current);
+    }
+  }, [readPlaying]);
 
   const togglePlay = useCallback((): void => {
     if (playingRef.current) {
@@ -188,13 +202,17 @@ export const usePlaybackClock = ({
       setEnded(true);
       callbacksRef.current.onPause?.();
       callbacksRef.current.onEnded?.();
-      audioRef.current?.pause();
+      // Re-check: an onPause/onEnded handler may synchronously re-enter the
+      // clock (e.g. call play()), and then audio must not be silenced.
+      if (!readPlaying()) {
+        audioRef.current?.pause();
+      }
     }, intervalMs);
     return () => {
       clearInterval(interval);
       audioRef.current?.pause();
     };
-  }, [info, loop, screen, showFrameAt, source]);
+  }, [info, loop, readPlaying, screen, showFrameAt, source]);
 
   const seekToMs = useCallback(
     (targetMs: number): void => {

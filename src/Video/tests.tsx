@@ -669,7 +669,7 @@ describe('Video audio wiring', () => {
       <Video screen={harness.screen} source={source} info={info} audio={audio.audio} autoPlay keyboard />,
     );
     await flush();
-    stdin.write('[C'); // right arrow
+    stdin.write('\u001B[C'); // right arrow
     await flush();
     expect(audio.playFroms.at(-1)).toBeGreaterThanOrEqual(SEEK_STEP_MS);
     unmount();
@@ -685,7 +685,7 @@ describe('Video audio wiring', () => {
     stdin.write(' ');
     await flush();
     const playsBefore = audio.playFroms.length;
-    stdin.write('[C'); // right arrow
+    stdin.write('\u001B[C'); // right arrow
     await flush();
     expect(audio.playFroms.length).toBe(playsBefore);
     unmount();
@@ -739,6 +739,32 @@ describe('Video audio wiring', () => {
     stdin.write('q');
     await flush();
     expect(audio.closeCalls).toBe(1);
+    unmount();
+  });
+
+  it('never starts audio when an onPlay handler synchronously pauses the clock', async () => {
+    const { harness, source, info } = await setup();
+    const audio = createFakeAudio();
+    const ref = createRef<VideoRef>();
+    const { unmount } = render(
+      <Video
+        ref={ref}
+        screen={harness.screen}
+        source={source}
+        info={info}
+        audio={audio.audio}
+        onPlay={() => {
+          // A host callback re-entering the clock synchronously: the trailing
+          // playFrom in play() must observe the paused state and not fire
+          ref.current?.pause();
+        }}
+      />,
+    );
+    await flush();
+    void ref.current?.play();
+    await flush();
+    expect(audio.playFroms).toEqual([]);
+    expect(audio.pauseCalls).toBeGreaterThanOrEqual(1);
     unmount();
   });
 });
