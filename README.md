@@ -59,11 +59,8 @@ a hue-cycling ball moving on a Lissajous path over a 20 second loop.
 
 ## How it works
 
-- The kitty-motion `Screen` is created before Ink renders. Its terminal probes read responses from stdin, and that handshake must finish before Ink's `useInput` takes stdin over
-- `Screen.getPlaceholderRows()` returns one string per grid row, and the player renders each as an ordinary Ink `<Text>`. The terminal fills those cells with the video
-- Each frame goes straight to `screen.pushFrame()`, so pixels update at the source frame rate without any Ink redraw
-- Ink itself redraws only when the displayed whole second changes (the time readout and progress bar), roughly once per second
-- On terminal resize the panel region is recomputed, the placeholder rows are re-read (the grid size can change), and the current frame is repainted
+The technical details (startup sequence, rendering path, playback clock, the
+`FrameSource` contract, module map) are in [docs/TRD.md](docs/TRD.md).
 
 ## Embedding in your own Ink app
 
