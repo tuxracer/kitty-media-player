@@ -20,7 +20,7 @@ Data flow: `cli` parses argv (`parseCliArgs`, a pure function in its own file so
 ### Module map
 
 - `src/cli/` - executable bin entry (`index.tsx` runs the player on import) plus `parseCliArgs.ts`, the exit codes, help text, and `VERSION`
-- `src/Video/` - the Ink component `Video` (with `Player` kept as a backwards-compatible alias): playback clock in `usePlaybackClock.ts`, self-managed resource lifecycle in `useManagedResources.ts`, probe-free Screen construction in `managedScreen.ts`, plus the two-mode props union (external resources vs. self-managed)
+- `src/Video/` - the Ink component `Video`: playback clock in `usePlaybackClock.ts`, self-managed resource lifecycle in `useManagedResources.ts`, probe-free Screen construction in `managedScreen.ts`, plus the two-mode props union (external resources vs. self-managed)
 - `src/frameSource/` - interface-only module holding the `FrameSource`/`FrameSourceInfo` contract (no implementation, no consts)
 - `src/fallbackPlayer/` - fallback playback for terminals that cannot run the full Ink player. `resolveFallbackRenderMode` picks the mode (a forced mode wins untouched, a multiplexed session skips the probe and takes the cell mode, otherwise the kitty graphics probe decides, falling back to `detectCellRenderMode`, cell-background on Terminal.app, half-block elsewhere). Probe-free `createFallbackScreen` builds the Screen at that mode (full-screen, autoResize), and `runFallbackPlayer` is a React-free port of the playback clock with raw-stdin keys (space, arrows, q/Ctrl-C) and no Ink UI
 - `src/proceduralSource/` - the built-in demo source, a hue-cycling ball on a Lissajous path rendered as a pure function of time into a reused framebuffer

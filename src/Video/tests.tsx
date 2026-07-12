@@ -11,7 +11,6 @@ import {
   PAUSE_GLYPH,
   PLAY_GLYPH,
   PLAYER_TITLE,
-  Player,
   Video,
 } from './index.tsx';
 import type { PlayerScreen, VideoRef } from './index.tsx';
@@ -97,11 +96,11 @@ const setup = async (): Promise<{
   return { harness: createFakeScreen(), source, info };
 };
 
-describe('Player', () => {
+describe('Video', () => {
   it('renders the placeholder rows and the time text', async () => {
     const { harness, source, info } = await setup();
     const { lastFrame, unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
+      <Video screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 
@@ -118,7 +117,7 @@ describe('Player', () => {
   it('toggles the pause glyph on space', async () => {
     const { harness, source, info } = await setup();
     const { lastFrame, stdin, unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
+      <Video screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
     expect(lastFrame()).toContain(PLAY_GLYPH);
@@ -137,7 +136,7 @@ describe('Player', () => {
   it('pushes the initial frame to the screen', async () => {
     const { harness, source, info } = await setup();
     const { unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
+      <Video screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 
@@ -149,7 +148,7 @@ describe('Player', () => {
   it('seeks forward on right arrow and updates the time text', async () => {
     const { harness, source, info } = await setup();
     const { lastFrame, stdin, unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
+      <Video screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 
@@ -163,7 +162,7 @@ describe('Player', () => {
   it('stops pushing frames after unmount', async () => {
     const { harness, source, info } = await setup();
     const { unmount } = render(
-      <Player screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
+      <Video screen={harness.screen} source={source} info={info} autoPlay keyboard controls />,
     );
     await flush();
 

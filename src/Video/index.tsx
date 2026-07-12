@@ -322,6 +322,3 @@ export const Video = forwardRef<VideoRef, VideoProps>((props, ref): ReactElement
 });
 
 Video.displayName = 'Video';
-
-/** Backwards-compatible alias, the component was originally exported as Player */
-export const Player = Video;

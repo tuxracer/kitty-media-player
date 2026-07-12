@@ -161,8 +161,8 @@ system install is needed:
 - `src/cli/` - executable bin entry (`index.tsx` runs the player on import)
   plus `parseCliArgs.ts`, `detectFallbackReasons.ts`, `confirmFallback.ts`,
   the exit codes, help text, and `VERSION`
-- `src/Video/` - the Ink component `Video` (with `Player` kept as a
-  backwards-compatible alias), the playback clock in `usePlaybackClock.ts`,
+- `src/Video/` - the Ink component `Video`, the playback clock in
+  `usePlaybackClock.ts`,
   self-managed resource lifecycle in `useManagedResources.ts`, probe-free
   Screen construction in `managedScreen.ts`, and the two-mode props union
   (external resources vs. self-managed)

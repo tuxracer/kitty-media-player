@@ -1,6 +1,6 @@
 /**
  * kitty-player library entry. Re-exports the public surface for hosts that
- * embed the Player in their own Ink app instead of running the CLI. The cli
+ * embed the Video component in their own Ink app instead of running the CLI. The cli
  * module is deliberately not exported (it is the executable bin entry and
  * runs the player on import).
  *
@@ -9,7 +9,7 @@
  * name ambiguous and silently drop it, so per-module duplicates like
  * MS_PER_SECOND stay internal.
  */
-export { Player, Video, canDisplayVideo, createManagedScreen } from './Video/index.tsx';
+export { Video, canDisplayVideo, createManagedScreen } from './Video/index.tsx';
 export type {
   ExternalVideoProps,
   ManagedResources,
@@ -20,7 +20,6 @@ export type {
   PlaybackCallbacks,
   PlaybackClock,
   PlaybackClockOptions,
-  PlayerProps,
   PlayerScreen,
   VideoBaseProps,
   VideoErrorCode,

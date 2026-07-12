@@ -112,7 +112,7 @@ way the CLI does.
 
 ## Library use
 
-The package also exports the pieces for embedding a video panel in your own Ink app: `Video` (the primary export, with `Player` kept as a backwards-compatible alias), the `FrameSource`/`FrameSourceInfo` contract, `createProceduralSource`, `createFfmpegSource`, `computePanelRegion`, and `formatTime`.
+The package also exports the pieces for embedding a video panel in your own Ink app: `Video`, the `FrameSource`/`FrameSourceInfo` contract, `createProceduralSource`, `createFfmpegSource`, `computePanelRegion`, and `formatTime`.
 
 ```tsx
 import { render } from 'ink';

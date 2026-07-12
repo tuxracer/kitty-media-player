@@ -167,6 +167,3 @@ export interface ManagedVideoProps extends VideoBaseProps {
 }
 
 export type VideoProps = ExternalVideoProps | ManagedVideoProps;
-
-/** Kept for existing library consumers, Player is an alias of Video */
-export type PlayerProps = VideoProps;
