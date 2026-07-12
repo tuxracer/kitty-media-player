@@ -12,6 +12,9 @@ import { startLoadingIndicator } from './loadingIndicator.ts';
 import { CLEAR_LINE, FALLBACK_PROMPT, RENDER_MODES, SPINNER_INTERVAL_MS } from './consts.ts';
 import { isRenderMode } from './types.ts';
 import type { LoadingIndicatorOutput } from './types.ts';
+import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
+import type { AudioProbeResult, VideoProbeResult } from '../mediaProbe/index.ts';
+import { openMediaSource } from './openMediaSource.ts';
 
 describe('parseCliArgs', () => {
   it('returns play when no arguments are given', () => {
@@ -288,5 +291,120 @@ describe('startLoadingIndicator', () => {
     indicator.stop();
     // Nothing to erase on a non-TTY, the notice line stays
     expect(output.writes.length).toBe(1);
+  });
+});
+
+describe('openMediaSource', () => {
+  const fakeInfo = (width: number): FrameSourceInfo => ({
+    width,
+    height: 36,
+    colorSpace: 'rgb24',
+    durationMs: 2_000,
+    fps: 10,
+    hasAudio: true,
+  });
+
+  interface FakeSource extends FrameSource {
+    closed: boolean;
+  }
+
+  const fakeSource = (info: FrameSourceInfo, openError?: Error): FakeSource => {
+    const source: FakeSource = {
+      closed: false,
+      open: () => (openError === undefined ? Promise.resolve(info) : Promise.reject(openError)),
+      getFrameAt: () => Promise.resolve(null),
+      seek: () => Promise.resolve(),
+      close: () => {
+        source.closed = true;
+        return Promise.resolve();
+      },
+    };
+    return source;
+  };
+
+  const videoProbe: VideoProbeResult = {
+    kind: 'video',
+    nativeWidth: 64,
+    nativeHeight: 36,
+    durationMs: 2_000,
+    fps: 10,
+    hasAudio: true,
+  };
+
+  const artProbe: AudioProbeResult = {
+    kind: 'audio',
+    durationMs: 2_000,
+    coverArt: { nativeWidth: 64, nativeHeight: 36 },
+  };
+
+  const bareAudioProbe: AudioProbeResult = { kind: 'audio', durationMs: 2_000, coverArt: null };
+
+  it('opens the video source for a video probe, passing the probe through', async () => {
+    const video = fakeSource(fakeInfo(1));
+    let received: unknown;
+    const opened = await openMediaSource({
+      filePath: 'movie.mp4',
+      probe: videoProbe,
+      createVideoSource: (options) => {
+        received = options.probe;
+        return video;
+      },
+      createArtSource: () => {
+        throw new Error('art source must not be constructed for video');
+      },
+      createWaveSource: () => {
+        throw new Error('waveform must not be constructed for video');
+      },
+    });
+    expect(opened.source).toBe(video);
+    expect(opened.info.width).toBe(1);
+    expect(received).toBe(videoProbe);
+  });
+
+  it('opens the cover art source for an audio probe with art', async () => {
+    const art = fakeSource(fakeInfo(2));
+    const opened = await openMediaSource({
+      filePath: 'song.mp3',
+      probe: artProbe,
+      createVideoSource: () => {
+        throw new Error('video source must not be constructed for audio');
+      },
+      createArtSource: () => art,
+      createWaveSource: () => {
+        throw new Error('waveform must not be constructed when art decodes');
+      },
+    });
+    expect(opened.source).toBe(art);
+    expect(opened.info.width).toBe(2);
+  });
+
+  it('falls back to the waveform when the art fails to decode, closing the art source', async () => {
+    const art = fakeSource(fakeInfo(2), new Error('no art'));
+    const wave = fakeSource(fakeInfo(3));
+    const opened = await openMediaSource({
+      filePath: 'song.mp3',
+      probe: artProbe,
+      createArtSource: () => art,
+      createWaveSource: (options) => {
+        expect(options.durationMs).toBe(2_000);
+        return wave;
+      },
+    });
+    expect(opened.source).toBe(wave);
+    expect(opened.info.width).toBe(3);
+    expect(art.closed).toBe(true);
+  });
+
+  it('opens the waveform directly for an audio probe without art', async () => {
+    const wave = fakeSource(fakeInfo(3));
+    const opened = await openMediaSource({
+      filePath: 'song.mp3',
+      probe: bareAudioProbe,
+      createArtSource: () => {
+        throw new Error('art source must not be constructed without art');
+      },
+      createWaveSource: () => wave,
+    });
+    expect(opened.source).toBe(wave);
   });
 });

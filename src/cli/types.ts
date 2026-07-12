@@ -1,4 +1,9 @@
 import type { RenderMode } from 'kitty-motion';
+import type { CoverArtSourceOptions } from '../coverArtSource/index.ts';
+import type { FfmpegSourceOptions } from '../ffmpegSource/index.ts';
+import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
+import type { MediaProbeResult } from '../mediaProbe/index.ts';
+import type { WaveformSourceOptions } from '../waveformSource/index.ts';
 import { RENDER_MODES } from './consts.ts';
 
 /** Play a video file, or the built-in procedural demo when file is absent */
@@ -62,4 +67,24 @@ export interface ConfirmFallbackOptions {
   output: NodeJS.WritableStream;
   /** The [y/N] question text written to output before reading the answer */
   prompt: string;
+}
+
+export interface OpenMediaSourceOptions {
+  /** Path or http(s) URL of the media file */
+  filePath: string;
+  /** Classification from probeMediaFile, decides which source plays the file */
+  probe: MediaProbeResult;
+  /** Injectable factory for video files (createFfmpegSource in production) */
+  createVideoSource?: (options: FfmpegSourceOptions) => FrameSource;
+  /** Injectable factory for audio files with embedded art (createCoverArtSource in production) */
+  createArtSource?: (options: CoverArtSourceOptions) => FrameSource;
+  /** Injectable factory for audio files without art (createWaveformSource in production) */
+  createWaveSource?: (options: WaveformSourceOptions) => FrameSource;
+}
+
+export interface OpenedMediaSource {
+  /** The opened source, ready for getFrameAt */
+  source: FrameSource;
+  /** The stream info its open() resolved */
+  info: FrameSourceInfo;
 }
