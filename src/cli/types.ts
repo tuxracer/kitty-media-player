@@ -130,3 +130,33 @@ export interface ResolvePlaybackRouteOptions {
   detectReasons?: () => FallbackReason[];
   resolveFallbackMode?: (forcedMode?: RenderMode) => Promise<RenderMode>;
 }
+
+export interface CliPlaybackScreen {
+  dispose(): void;
+}
+
+export type CliPlaybackExecutionResult = 'rendered' | 'exit-ok' | 'exit-error';
+
+export interface RunCliPlaybackDependencies<Screen extends CliPlaybackScreen = CliPlaybackScreen> {
+  detectReasons(): FallbackReason[];
+  resolveFallbackMode(forcedMode?: RenderMode): Promise<RenderMode>;
+  confirmFallback(route: Extract<CliPlaybackRoute, { kind: 'visual' }>): Promise<boolean>;
+  prepareKittyFallback(): Promise<unknown>;
+  createFallbackScreen(playback: Exclude<CliMediaPlayback, { kind: 'audio-only' }>, mode: RenderMode): Screen;
+  runVisualFallback(playback: Exclude<CliMediaPlayback, { kind: 'audio-only' }>, screen: Screen): Promise<void>;
+  runAudioFallback(playback: Extract<CliMediaPlayback, { kind: 'audio-only' }>): Promise<void>;
+  createVisualScreen(playback: Exclude<CliMediaPlayback, { kind: 'audio-only' }>, forceKitty: boolean): Promise<Screen>;
+  renderVisual(playback: Exclude<CliMediaPlayback, { kind: 'audio-only' }>, screen: Screen): unknown;
+  renderAudio(playback: Extract<CliMediaPlayback, { kind: 'audio-only' }>): unknown;
+  reportError(error: unknown): void;
+}
+
+export interface RunCliPlaybackOptions<Screen extends CliPlaybackScreen = CliPlaybackScreen> {
+  openPlayback(): Promise<CliMediaPlayback>;
+  closeOpeningResources(): Promise<void>;
+  onOpeningSettled?(): void;
+  fallback: boolean;
+  renderMode?: RenderMode;
+  muted: boolean;
+  dependencies: RunCliPlaybackDependencies<Screen>;
+}

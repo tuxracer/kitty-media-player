@@ -17,7 +17,11 @@ import {
   SPINNER_INTERVAL_MS,
 } from './consts.ts';
 import { isAudioVisualMode, isRenderMode } from './types.ts';
-import type { FallbackReason, LoadingIndicatorOutput } from './types.ts';
+import type {
+  FallbackReason,
+  LoadingIndicatorOutput,
+  RunCliPlaybackDependencies,
+} from './types.ts';
 import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
 import type { AudioProbeResult, VideoProbeResult } from '../mediaProbe/index.ts';
 import { openMediaSource } from './openMediaSource.ts';
@@ -27,6 +31,7 @@ import {
   resolveMediaPlayback,
   resolvePlaybackRoute,
 } from './resolveMediaPlayback.ts';
+import { runCliPlayback } from './runCliPlayback.ts';
 
 describe('parseCliArgs', () => {
   it('returns play when no arguments are given', () => {
@@ -682,4 +687,350 @@ describe('resolvePlaybackRoute', () => {
     expect(closeSource).toHaveBeenCalledOnce();
     expect(closeAudio).toHaveBeenCalledOnce();
   });
+});
+
+describe('runCliPlayback', () => {
+  const info: FrameSourceInfo = {
+    width: 64,
+    height: 36,
+    colorSpace: 'rgb24',
+    durationMs: 2_000,
+    fps: 10,
+    hasAudio: true,
+  };
+  const createVisualPlayback = (kind: 'procedural' | 'video' = 'video') => {
+    const closeSource = vi.fn(() => Promise.resolve());
+    const closeAudio = vi.fn(() => Promise.resolve());
+    const source: FrameSource = {
+      open: () => Promise.resolve(info),
+      getFrameAt: () => Promise.resolve(null),
+      seek: () => Promise.resolve(),
+      close: closeSource,
+    };
+    const audio = {
+      open: () => Promise.resolve({ hasAudio: true }),
+      playFrom: () => undefined,
+      pause: () => undefined,
+      setMuted: () => undefined,
+      isStarting: () => false,
+      getPositionMs: () => null,
+      close: closeAudio,
+    };
+    const playback =
+      kind === 'procedural'
+        ? { kind, source, info }
+        : { kind, source, info, audio };
+    return { playback, closeSource, closeAudio };
+  };
+  const createDependencies = () => ({
+    detectReasons: vi.fn((): FallbackReason[] => []),
+    resolveFallbackMode: vi.fn(
+      (..._args: Parameters<RunCliPlaybackDependencies['resolveFallbackMode']>) =>
+        Promise.resolve<Awaited<ReturnType<RunCliPlaybackDependencies['resolveFallbackMode']>>>(
+          'half-block',
+        ),
+    ),
+    confirmFallback: vi.fn(() => Promise.resolve(true)),
+    prepareKittyFallback: vi.fn(() => Promise.resolve()),
+    createFallbackScreen: vi.fn(() => ({ dispose: vi.fn() })),
+    runVisualFallback: vi.fn(() => Promise.resolve()),
+    runAudioFallback: vi.fn(() => Promise.resolve()),
+    createVisualScreen: vi.fn(
+      (..._args: Parameters<RunCliPlaybackDependencies['createVisualScreen']>) =>
+        Promise.resolve({ dispose: vi.fn() }),
+    ),
+    renderVisual: vi.fn(),
+    renderAudio: vi.fn(),
+    reportError: vi.fn(),
+  });
+
+  it('opens before fallback detection and closes media when the prompt is declined', async () => {
+    const events: string[] = [];
+    const closeSource = vi.fn(() => {
+      events.push('close-source');
+      return Promise.resolve();
+    });
+    const playback = {
+      kind: 'procedural' as const,
+      source: {
+        open: () => Promise.reject(new Error('already open')),
+        getFrameAt: () => Promise.resolve(null),
+        seek: () => Promise.resolve(),
+        close: closeSource,
+      },
+      info: {
+        width: 64,
+        height: 36,
+        colorSpace: 'rgb24' as const,
+        durationMs: 2_000,
+        fps: 10,
+        hasAudio: false,
+      },
+    };
+    const unexpected = (): never => {
+      throw new Error('unexpected execution seam');
+    };
+    const result = await runCliPlayback({
+      openPlayback: () => {
+        events.push('open');
+        return Promise.resolve(playback);
+      },
+      closeOpeningResources: () => Promise.resolve(),
+      fallback: false,
+      muted: false,
+      dependencies: {
+        detectReasons: () => {
+          events.push('detect');
+          return ['no-placeholder-support'];
+        },
+        resolveFallbackMode: () => {
+          events.push('resolve-mode');
+          return Promise.resolve('half-block');
+        },
+        confirmFallback: () => {
+          events.push('prompt');
+          return Promise.resolve(false);
+        },
+        prepareKittyFallback: unexpected,
+        createFallbackScreen: unexpected,
+        runVisualFallback: unexpected,
+        runAudioFallback: unexpected,
+        createVisualScreen: unexpected,
+        renderVisual: unexpected,
+        renderAudio: unexpected,
+        reportError: unexpected,
+      },
+    });
+
+    expect(result).toBe('exit-ok');
+    expect(events).toEqual(['open', 'detect', 'resolve-mode', 'prompt', 'close-source']);
+    expect(closeSource).toHaveBeenCalledOnce();
+  });
+
+  it('closes visual media when full Screen construction fails', async () => {
+    const { playback, closeSource, closeAudio } = createVisualPlayback();
+    const dependencies = createDependencies();
+    const failure = new Error('screen failed');
+    dependencies.createVisualScreen.mockRejectedValue(failure);
+
+    await expect(
+      runCliPlayback({
+        openPlayback: () => Promise.resolve(playback),
+        closeOpeningResources: () => Promise.resolve(),
+        fallback: false,
+        muted: false,
+        dependencies,
+      }),
+    ).resolves.toBe('exit-error');
+    expect(closeSource).toHaveBeenCalledOnce();
+    expect(closeAudio).toHaveBeenCalledOnce();
+    expect(dependencies.reportError).toHaveBeenCalledWith(failure);
+    expect(dependencies.renderVisual).not.toHaveBeenCalled();
+  });
+
+  it('disposes the full Screen and closes visual media when Ink render throws', async () => {
+    const { playback, closeSource, closeAudio } = createVisualPlayback();
+    const dependencies = createDependencies();
+    const dispose = vi.fn();
+    const failure = new Error('render failed');
+    dependencies.createVisualScreen.mockResolvedValue({ dispose });
+    dependencies.renderVisual.mockImplementation(() => {
+      throw failure;
+    });
+
+    await expect(
+      runCliPlayback({
+        openPlayback: () => Promise.resolve(playback),
+        closeOpeningResources: () => Promise.resolve(),
+        fallback: false,
+        muted: false,
+        dependencies,
+      }),
+    ).resolves.toBe('exit-error');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(closeSource).toHaveBeenCalledOnce();
+    expect(closeAudio).toHaveBeenCalledOnce();
+    expect(dependencies.reportError).toHaveBeenCalledWith(failure);
+  });
+
+  it('closes audio when the audio-only Ink render throws', async () => {
+    const closeAudio = vi.fn(() => Promise.resolve());
+    const playback = {
+      kind: 'audio-only' as const,
+      durationMs: 2_000,
+      audio: {
+        open: () => Promise.resolve({ hasAudio: true }),
+        playFrom: () => undefined,
+        pause: () => undefined,
+        setMuted: () => undefined,
+        isStarting: () => false,
+        getPositionMs: () => null,
+        close: closeAudio,
+      },
+      label: null,
+    };
+    const dependencies = createDependencies();
+    const failure = new Error('audio render failed');
+    dependencies.renderAudio.mockImplementation(() => {
+      throw failure;
+    });
+
+    await expect(
+      runCliPlayback({
+        openPlayback: () => Promise.resolve(playback),
+        closeOpeningResources: () => Promise.resolve(),
+        fallback: false,
+        muted: false,
+        dependencies,
+      }),
+    ).resolves.toBe('exit-error');
+    expect(closeAudio).toHaveBeenCalledOnce();
+    expect(dependencies.reportError).toHaveBeenCalledWith(failure);
+    expect(dependencies.detectReasons).not.toHaveBeenCalled();
+    expect(dependencies.createVisualScreen).not.toHaveBeenCalled();
+  });
+
+  it('disposes a fallback Screen and closes media when fallback playback rejects', async () => {
+    const { playback, closeSource, closeAudio } = createVisualPlayback();
+    const dependencies = createDependencies();
+    const dispose = vi.fn();
+    const failure = new Error('fallback failed');
+    dependencies.createFallbackScreen.mockReturnValue({ dispose });
+    dependencies.runVisualFallback.mockRejectedValue(failure);
+
+    await expect(
+      runCliPlayback({
+        openPlayback: () => Promise.resolve(playback),
+        closeOpeningResources: () => Promise.resolve(),
+        fallback: true,
+        renderMode: 'half-block',
+        muted: false,
+        dependencies,
+      }),
+    ).resolves.toBe('exit-error');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(closeSource).toHaveBeenCalledOnce();
+    expect(closeAudio).toHaveBeenCalledOnce();
+    expect(dependencies.reportError).toHaveBeenCalledWith(failure);
+  });
+
+  it('routes forced kitty procedural playback through Screen before Ink without detection', async () => {
+    const { playback } = createVisualPlayback('procedural');
+    const dependencies = createDependencies();
+    const events: string[] = [];
+    dependencies.createVisualScreen.mockImplementation((_playback, forceKitty) => {
+      events.push(`screen:${String(forceKitty)}`);
+      return Promise.resolve({ dispose: vi.fn() });
+    });
+    dependencies.renderVisual.mockImplementation(() => {
+      events.push('render');
+    });
+
+    await expect(
+      runCliPlayback({
+        openPlayback: () => {
+          events.push('open');
+          return Promise.resolve(playback);
+        },
+        closeOpeningResources: () => Promise.resolve(),
+        fallback: false,
+        renderMode: 'kitty',
+        muted: false,
+        dependencies,
+      }),
+    ).resolves.toBe('rendered');
+    expect(events).toEqual(['open', 'screen:true', 'render']);
+    expect(dependencies.detectReasons).not.toHaveBeenCalled();
+    expect(dependencies.resolveFallbackMode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { fallback: false, renderMode: 'half-block' as const },
+    { fallback: true, renderMode: 'kitty' as const },
+  ])('routes forced $renderMode fallback without detection', async ({ fallback, renderMode }) => {
+    const { playback } = createVisualPlayback();
+    const dependencies = createDependencies();
+    dependencies.resolveFallbackMode.mockResolvedValue(renderMode);
+
+    await expect(
+      runCliPlayback({
+        openPlayback: () => Promise.resolve(playback),
+        closeOpeningResources: () => Promise.resolve(),
+        fallback,
+        renderMode,
+        muted: false,
+        dependencies,
+      }),
+    ).resolves.toBe('exit-ok');
+    expect(dependencies.detectReasons).not.toHaveBeenCalled();
+    expect(dependencies.resolveFallbackMode).toHaveBeenCalledWith(renderMode);
+    expect(dependencies.createFallbackScreen).toHaveBeenCalledWith(playback, renderMode);
+    expect(dependencies.runVisualFallback).toHaveBeenCalledOnce();
+  });
+
+  it('renders audio-only playback after opening with null audio and no visual terminal work', async () => {
+    const playback = {
+      kind: 'audio-only' as const,
+      durationMs: 2_000,
+      audio: null,
+      label: 'Track',
+    };
+    const dependencies = createDependencies();
+    const events: string[] = [];
+    dependencies.renderAudio.mockImplementation((received) => {
+      events.push('render');
+      expect(received.audio).toBeNull();
+    });
+
+    await expect(
+      runCliPlayback({
+        openPlayback: () => {
+          events.push('open');
+          return Promise.resolve(playback);
+        },
+        closeOpeningResources: () => Promise.resolve(),
+        fallback: false,
+        renderMode: 'kitty',
+        muted: false,
+        dependencies,
+      }),
+    ).resolves.toBe('rendered');
+    expect(events).toEqual(['open', 'render']);
+    expect(dependencies.detectReasons).not.toHaveBeenCalled();
+    expect(dependencies.resolveFallbackMode).not.toHaveBeenCalled();
+    expect(dependencies.createVisualScreen).not.toHaveBeenCalled();
+    expect(dependencies.createFallbackScreen).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { fallback: false, renderMode: 'half-block' as const },
+    { fallback: true, renderMode: 'kitty' as const },
+  ])(
+    'routes forced $renderMode audio-only playback to raw fallback without graphics work',
+    async ({ fallback, renderMode }) => {
+      const playback = {
+        kind: 'audio-only' as const,
+        durationMs: 2_000,
+        audio: null,
+        label: null,
+      };
+      const dependencies = createDependencies();
+
+      await expect(
+        runCliPlayback({
+          openPlayback: () => Promise.resolve(playback),
+          closeOpeningResources: () => Promise.resolve(),
+          fallback,
+          renderMode,
+          muted: false,
+          dependencies,
+        }),
+      ).resolves.toBe('exit-ok');
+      expect(dependencies.runAudioFallback).toHaveBeenCalledWith(playback);
+      expect(dependencies.detectReasons).not.toHaveBeenCalled();
+      expect(dependencies.resolveFallbackMode).not.toHaveBeenCalled();
+      expect(dependencies.createVisualScreen).not.toHaveBeenCalled();
+      expect(dependencies.createFallbackScreen).not.toHaveBeenCalled();
+    },
+  );
 });
