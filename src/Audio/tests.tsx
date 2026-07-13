@@ -917,6 +917,7 @@ describe('AudioPlayerView', () => {
     visualScreen: null,
     visualRows: [],
     visualLabel: null,
+    visualRegionRevision: 0,
     onVisualError: () => undefined,
     ...overrides,
   });
@@ -1011,7 +1012,14 @@ describe('AudioPlayerView', () => {
     await flush();
     expect(times.at(-1)).toBe(1_250);
 
-    view.rerender(<AudioPlayerView ref={ref} {...firstProps} width={40} />);
+    view.rerender(
+      <AudioPlayerView
+        ref={ref}
+        {...firstProps}
+        width={40}
+        visualRegionRevision={1}
+      />,
+    );
     await flush();
     expect(times.at(-1)).toBe(1_250);
     view.unmount();
@@ -1146,6 +1154,39 @@ describe('Audio', () => {
     expect(artworkScreen.disposeCalls).toBe(1);
     expect(audio.closeCalls).toBe(0);
     expect(ref.current?.currentTime).toBe(5);
+    view.unmount();
+  });
+
+  it('repaints the paused playhead after controls resize the managed visual', async () => {
+    const audio = createFakeAudio();
+    const getFrameAt = vi.fn(() => Promise.resolve(new Uint8Array([1])));
+    const visual = createFakeVisualSource(getFrameAt);
+    const screen = createFakeVisualScreen();
+    mockSuccessfulLoad(audio, 20_000);
+    audioVisualMocks.openAudioVisual.mockResolvedValue({
+      kind: 'source',
+      visualKind: 'waveform',
+      source: visual.source,
+      info: VISUAL_INFO,
+      label: 'Track',
+    });
+    managedScreenMocks.createManagedScreen.mockReturnValue(screen.screen);
+    const ref = createRef<AudioRef>();
+    const view = render(<Audio ref={ref} src="song.mp3" visual="waveform" />);
+    await flush();
+    ref.current!.currentTime = 1.25;
+    await flush();
+    const regionCalls = screen.regions.length;
+    getFrameAt.mockClear();
+
+    view.rerender(
+      <Audio ref={ref} src="song.mp3" visual="waveform" controls={false} />,
+    );
+    await flush();
+
+    expect(screen.regions).toHaveLength(regionCalls + 1);
+    expect(getFrameAt).toHaveBeenCalledWith(1_250);
+    expect(ref.current?.paused).toBe(true);
     view.unmount();
   });
 

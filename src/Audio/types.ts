@@ -152,6 +152,7 @@ export interface AudioPlayerViewProps extends AudioPlaybackCallbacks {
   visualScreen: PlayerScreen | null;
   visualRows: string[];
   visualLabel: string | null;
+  visualRegionRevision: number;
   onVisualError(error: unknown): void;
   onLoadedMetadata?: (event: AudioLoadedMetadataEvent) => void;
   onQuit?: () => void;

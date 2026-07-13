@@ -40,6 +40,7 @@ export const AudioPlayerView = forwardRef<AudioRef, AudioPlayerViewProps>(
       visualScreen,
       visualRows,
       visualLabel,
+      visualRegionRevision,
       onVisualError,
       onLoadedMetadata,
       onQuit,
@@ -94,6 +95,7 @@ export const AudioPlayerView = forwardRef<AudioRef, AudioPlayerViewProps>(
         }
       },
       onVisualError,
+      regionRevision: visualRegionRevision,
     });
     const visualResolved =
       visualStatus === 'none' ||
@@ -166,9 +168,6 @@ export const AudioPlayerView = forwardRef<AudioRef, AudioPlayerViewProps>(
     useEffect(() => {
       repaintVisual();
     }, [clock.elapsedMs, repaintVisual]);
-    useEffect(() => {
-      repaintVisual();
-    }, [height, repaintVisual, width]);
 
     useImperativeHandle(
       ref,

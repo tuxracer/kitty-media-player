@@ -67,6 +67,7 @@ export const Audio = forwardRef<AudioRef, AudioProps>((props, ref): ReactElement
       visualScreen={visualEnabled && visualHeight > 0 ? visual.screen : null}
       visualRows={visualEnabled && visualHeight > 0 ? visual.placeholderRows : []}
       visualLabel={visualEnabled && visualHeight > 0 ? visual.label : null}
+      visualRegionRevision={visual.regionRevision}
       onVisualError={visual.degradeToPlaceholder}
       onLoadedMetadata={onLoadedMetadata}
       onQuit={() => {
