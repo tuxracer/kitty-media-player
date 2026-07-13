@@ -5,7 +5,7 @@ Play video and audio in the terminal. An [Ink](https://github.com/vadimdemedes/i
 ## Requirements
 
 - Node.js 24 or newer
-- Kitty or Ghostty outside tmux or GNU screen for the full player
+- [Kitty](https://sw.kovidgoyal.net/kitty/) or [Ghostty](https://ghostty.org/) outside tmux or GNU screen for the full player
 - An interactive terminal
 
 Other terminals can use a reduced fallback player. ffmpeg and ffprobe are bundled.
