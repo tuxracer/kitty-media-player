@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react';
 
 import type { AudioPlayer } from '../audioPlayer/index.ts';
+import type { AudioVisualMode } from '../audioVisual/index.ts';
+import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
+import type { AudioProbeResult } from '../mediaProbe/index.ts';
+import type { PlayerScreen } from '../Video/index.tsx';
 
 export type AudioErrorCode = 'NO_AUDIO_STREAM' | 'AUDIO_UNAVAILABLE';
 
@@ -31,12 +35,49 @@ export interface ManagedAudioResources {
   status: ManagedAudioStatus;
   audio: AudioPlayer | null;
   durationMs: number | null;
+  probe: AudioProbeResult | null;
 }
 
 export interface ManagedAudioResourcesOptions {
   src: string;
   onLoadedMetadata?: (event: AudioLoadedMetadataEvent) => void;
   onError?: (error: unknown) => void;
+}
+
+export type ManagedAudioVisualStatus = 'none' | 'loading' | 'placeholder' | 'ready';
+
+export interface ManagedAudioVisualResources {
+  status: ManagedAudioVisualStatus;
+  label: string | null;
+  source: FrameSource | null;
+  info: FrameSourceInfo | null;
+  screen: PlayerScreen | null;
+  placeholderRows: string[];
+  degradeToPlaceholder(): void;
+}
+
+export interface ManagedAudioVisualResourcesOptions {
+  enabled: boolean;
+  src: string;
+  probe: AudioProbeResult | null;
+  mode: AudioVisualMode;
+  width: number;
+  height: number;
+}
+
+export interface AudioVisualRendererOptions {
+  source: FrameSource | null;
+  info: FrameSourceInfo | null;
+  screen: PlayerScreen | null;
+  playing: boolean;
+  getElapsedMs(): number;
+  onReady(): void;
+  onVisualError(error: unknown): void;
+}
+
+export interface AudioVisualRenderer {
+  ready: boolean;
+  repaint(): void;
 }
 
 export interface AudioPlaybackCallbacks {

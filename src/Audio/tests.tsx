@@ -4,8 +4,12 @@ import { createRef, forwardRef, useImperativeHandle } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioPlayer } from '../audioPlayer/index.ts';
+import type { AudioVisualMode, AudioVisualSelection } from '../audioVisual/index.ts';
 import type { FfmpegAudioPlayerOptions } from '../ffmpegAudioPlayer/index.ts';
+import type { FrameSource, FrameSourceInfo } from '../frameSource/index.ts';
+import type { AudioProbeResult } from '../mediaProbe/index.ts';
 import { MediaProbeError } from '../mediaProbe/index.ts';
+import type { PlayerScreen } from '../Video/index.tsx';
 import {
   AUDIO_TICK_MS,
   BUFFERING_TEXT,
@@ -20,11 +24,18 @@ import type {
   AudioRef,
   AudioPlaybackClock,
   AudioPlaybackClockOptions,
+  AudioVisualRenderer,
+  AudioVisualRendererOptions,
+  ManagedAudioVisualResources,
+  ManagedAudioVisualResourcesOptions,
+  ManagedAudioResources,
   ManagedAudioResourcesOptions,
 } from './types.ts';
 import { Audio } from './index.tsx';
 import { useAudioPlaybackClock } from './useAudioPlaybackClock.ts';
+import { useAudioVisualRenderer } from './useAudioVisualRenderer.ts';
 import { useManagedResources } from './useManagedResources.ts';
+import { useManagedVisualResources } from './useManagedVisualResources.ts';
 
 const mediaProbeMocks = vi.hoisted(() => ({
   probeMediaFile: vi.fn(),
@@ -32,6 +43,15 @@ const mediaProbeMocks = vi.hoisted(() => ({
 
 const ffmpegAudioMocks = vi.hoisted(() => ({
   createFfmpegAudioPlayer: vi.fn(),
+}));
+
+const audioVisualMocks = vi.hoisted(() => ({
+  openAudioVisual: vi.fn(),
+}));
+
+const managedScreenMocks = vi.hoisted(() => ({
+  canDisplayVideo: vi.fn((): boolean => true),
+  createManagedScreen: vi.fn(),
 }));
 
 const appMocks = vi.hoisted(() => ({
@@ -47,6 +67,11 @@ vi.mock('../mediaProbe/index.ts', async (importOriginal) => ({
   ...mediaProbeMocks,
 }));
 vi.mock('../ffmpegAudioPlayer/index.ts', () => ffmpegAudioMocks);
+vi.mock('../audioVisual/index.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../audioVisual/index.ts')>()),
+  ...audioVisualMocks,
+}));
+vi.mock('../Video/managedScreen.ts', () => managedScreenMocks);
 
 interface FakeAudioHarness {
   audio: AudioPlayer;
@@ -136,10 +161,95 @@ const mockSuccessfulLoad = (harness: FakeAudioHarness, durationMs: number): void
   ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(harness.audio);
 };
 
-const ManagedResourcesHarness = (props: ManagedAudioResourcesOptions) => {
-  const resources = useManagedResources(props);
-  return <Text>{`${resources.status}:${resources.durationMs ?? 'null'}`}</Text>;
+const ManagedResourcesHarness = forwardRef<ManagedAudioResources, ManagedAudioResourcesOptions>(
+  (props, ref) => {
+    const resources = useManagedResources(props);
+    useImperativeHandle(ref, () => resources, [resources]);
+    return <Text>{`${resources.status}:${resources.durationMs ?? 'null'}`}</Text>;
+  },
+);
+
+const VISUAL_INFO: FrameSourceInfo = {
+  width: 640,
+  height: 360,
+  colorSpace: 'rgb24',
+  durationMs: 20_000,
+  fps: 25,
 };
+
+interface FakeVisualSource {
+  source: FrameSource;
+  closeCalls: number;
+}
+
+const createFakeVisualSource = (
+  getFrameAt: FrameSource['getFrameAt'] = () => Promise.resolve(new Uint8Array([1, 2, 3])),
+): FakeVisualSource => {
+  const harness: FakeVisualSource = {
+    closeCalls: 0,
+    source: {
+      open: () => Promise.resolve(VISUAL_INFO),
+      getFrameAt,
+      seek: () => Promise.resolve(),
+      close: () => {
+        harness.closeCalls += 1;
+        return Promise.resolve();
+      },
+    },
+  };
+  return harness;
+};
+
+interface FakeVisualScreen {
+  screen: PlayerScreen;
+  pushedFrames: Uint8Array[];
+  regions: unknown[];
+  disposeCalls: number;
+  rows: string[];
+}
+
+const createFakeVisualScreen = (): FakeVisualScreen => {
+  const harness: FakeVisualScreen = {
+    pushedFrames: [],
+    regions: [],
+    disposeCalls: 0,
+    rows: ['visual-row'],
+    screen: {
+      getPlaceholderRows: () => [...harness.rows],
+      pushFrame: (frame) => harness.pushedFrames.push(frame),
+      setRegion: (region) => harness.regions.push(region),
+      isWritable: () => true,
+      dispose: () => {
+        harness.disposeCalls += 1;
+      },
+    },
+  };
+  return harness;
+};
+
+const AUDIO_PROBE: AudioProbeResult = {
+  kind: 'audio',
+  durationMs: 20_000,
+  coverArt: null,
+  title: 'Track',
+};
+
+const VisualResourcesHarness = forwardRef<
+  ManagedAudioVisualResources,
+  ManagedAudioVisualResourcesOptions
+>((props, ref) => {
+  const resources = useManagedVisualResources(props);
+  useImperativeHandle(ref, () => resources, [resources]);
+  return <Text>{`${resources.status}:${resources.label ?? ''}:${resources.placeholderRows.join('|')}`}</Text>;
+});
+
+const VisualRendererHarness = forwardRef<AudioVisualRenderer, AudioVisualRendererOptions>(
+  (props, ref) => {
+    const renderer = useAudioVisualRenderer(props);
+    useImperativeHandle(ref, () => renderer, [renderer]);
+    return <Text>{renderer.ready ? 'ready' : 'waiting'}</Text>;
+  },
+);
 
 describe('useManagedResources', () => {
   beforeEach(() => {
@@ -165,6 +275,20 @@ describe('useManagedResources', () => {
     expect(view.lastFrame()).toContain('ready:20000');
     expect(onLoadedMetadata).toHaveBeenCalledOnce();
     expect(onLoadedMetadata).toHaveBeenCalledWith({ duration: 20 });
+    view.unmount();
+  });
+
+  it('retains the exact successful media probe', async () => {
+    const harness = createFakeAudio();
+    const probe: AudioProbeResult = { ...AUDIO_PROBE };
+    mediaProbeMocks.probeMediaFile.mockResolvedValue(probe);
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(harness.audio);
+    const resources = createRef<ManagedAudioResources>();
+
+    const view = render(<ManagedResourcesHarness ref={resources} src="track.mp3" />);
+    await settle();
+
+    expect(resources.current?.probe).toBe(probe);
     view.unmount();
   });
 
@@ -332,6 +456,306 @@ describe('useManagedResources', () => {
 
     expect(onLoadedMetadata).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('useManagedVisualResources', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    managedScreenMocks.canDisplayVideo.mockReturnValue(true);
+  });
+
+  const renderVisual = (
+    ref: ReturnType<typeof createRef<ManagedAudioVisualResources>>,
+    overrides: Partial<ManagedAudioVisualResourcesOptions> = {},
+  ) =>
+    render(
+      <VisualResourcesHarness
+        ref={ref}
+        enabled
+        src="song.mp3"
+        probe={AUDIO_PROBE}
+        mode="waveform"
+        width={40}
+        height={12}
+        {...overrides}
+      />,
+    );
+
+  it.each<[AudioVisualMode, AudioVisualSelection, string]>([
+    ['none', { kind: 'none' }, 'none::'],
+    ['artwork', { kind: 'placeholder', label: 'Track' }, 'placeholder:Track:'],
+  ])('returns the %s selection without constructing a screen', async (mode, selection, frame) => {
+    audioVisualMocks.openAudioVisual.mockResolvedValue(selection);
+    const resources = createRef<ManagedAudioVisualResources>();
+    const view = renderVisual(resources, { mode });
+    await settle();
+
+    expect(view.lastFrame()).toContain(frame);
+    expect(managedScreenMocks.createManagedScreen).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('opens a source and creates a probe-free letterboxed screen', async () => {
+    const visual = createFakeVisualSource();
+    const screen = createFakeVisualScreen();
+    audioVisualMocks.openAudioVisual.mockResolvedValue({
+      kind: 'source',
+      visualKind: 'waveform',
+      source: visual.source,
+      info: VISUAL_INFO,
+      label: 'Track',
+    });
+    managedScreenMocks.createManagedScreen.mockReturnValue(screen.screen);
+    const resources = createRef<ManagedAudioVisualResources>();
+    const view = renderVisual(resources);
+    await settle();
+
+    expect(resources.current?.status).toBe('ready');
+    expect(resources.current?.placeholderRows).toEqual(['visual-row']);
+    expect(managedScreenMocks.createManagedScreen).toHaveBeenCalledWith({
+      region: { offsetCol: 1, offsetRow: 1, cols: 40, rows: 11 },
+      sourceWidth: 640,
+      sourceHeight: 360,
+      colorSpace: 'rgb24',
+    });
+    view.unmount();
+  });
+
+  it('closes a selected source and degrades when Kitty placeholders are unsupported', async () => {
+    const visual = createFakeVisualSource();
+    managedScreenMocks.canDisplayVideo.mockReturnValue(false);
+    audioVisualMocks.openAudioVisual.mockResolvedValue({
+      kind: 'source',
+      visualKind: 'waveform',
+      source: visual.source,
+      info: VISUAL_INFO,
+      label: 'Track',
+    });
+    const resources = createRef<ManagedAudioVisualResources>();
+    const view = renderVisual(resources);
+    await settle();
+
+    expect(resources.current?.status).toBe('placeholder');
+    expect(resources.current?.label).toBe('Track');
+    expect(visual.closeCalls).toBe(1);
+    expect(managedScreenMocks.createManagedScreen).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('replaces only visual resources when the visual mode changes', async () => {
+    const audio = createFakeAudio();
+    const firstVisual = createFakeVisualSource();
+    const secondVisual = createFakeVisualSource();
+    const firstScreen = createFakeVisualScreen();
+    const secondScreen = createFakeVisualScreen();
+    mediaProbeMocks.probeMediaFile.mockResolvedValue(AUDIO_PROBE);
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(audio.audio);
+    audioVisualMocks.openAudioVisual
+      .mockResolvedValueOnce({ kind: 'source', visualKind: 'waveform', source: firstVisual.source, info: VISUAL_INFO, label: 'Track' })
+      .mockResolvedValueOnce({ kind: 'source', visualKind: 'artwork', source: secondVisual.source, info: VISUAL_INFO, label: 'Track' });
+    managedScreenMocks.createManagedScreen
+      .mockReturnValueOnce(firstScreen.screen)
+      .mockReturnValueOnce(secondScreen.screen);
+
+    const CombinedHarness = ({ mode }: { mode: AudioVisualMode }) => {
+      const managed = useManagedResources({ src: 'song.mp3' });
+      useManagedVisualResources({ enabled: true, src: 'song.mp3', probe: managed.probe, mode, width: 40, height: 12 });
+      return null;
+    };
+    const view = render(<CombinedHarness mode="waveform" />);
+    await settle();
+    view.rerender(<CombinedHarness mode="artwork" />);
+    await settle();
+
+    expect(mediaProbeMocks.probeMediaFile).toHaveBeenCalledTimes(1);
+    expect(ffmpegAudioMocks.createFfmpegAudioPlayer).toHaveBeenCalledTimes(1);
+    expect(firstVisual.closeCalls).toBe(1);
+    expect(firstScreen.disposeCalls).toBe(1);
+    expect(audio.closeCalls).toBe(0);
+    view.unmount();
+  });
+
+  it('closes a stale visual open and never lets it replace the current visual', async () => {
+    const stale = createDeferred<AudioVisualSelection>();
+    const staleVisual = createFakeVisualSource();
+    const currentVisual = createFakeVisualSource();
+    const screen = createFakeVisualScreen();
+    audioVisualMocks.openAudioVisual
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce({ kind: 'source', visualKind: 'artwork', source: currentVisual.source, info: VISUAL_INFO, label: 'Current' });
+    managedScreenMocks.createManagedScreen.mockReturnValue(screen.screen);
+    const resources = createRef<ManagedAudioVisualResources>();
+    const view = renderVisual(resources);
+    view.rerender(
+      <VisualResourcesHarness ref={resources} enabled src="song.mp3" probe={AUDIO_PROBE} mode="artwork" width={40} height={12} />,
+    );
+    await settle();
+    stale.resolve({ kind: 'source', visualKind: 'waveform', source: staleVisual.source, info: VISUAL_INFO, label: 'Stale' });
+    await settle();
+
+    expect(resources.current?.label).toBe('Current');
+    expect(staleVisual.closeCalls).toBe(1);
+    expect(managedScreenMocks.createManagedScreen).toHaveBeenCalledTimes(1);
+    resources.current?.degradeToPlaceholder();
+    await settle();
+    expect(resources.current?.label).toBe('Current');
+    view.unmount();
+  });
+
+  it('disposes the exact screen and closes the exact source on unmount', async () => {
+    const visual = createFakeVisualSource();
+    const screen = createFakeVisualScreen();
+    audioVisualMocks.openAudioVisual.mockResolvedValue({ kind: 'source', visualKind: 'waveform', source: visual.source, info: VISUAL_INFO, label: 'Track' });
+    managedScreenMocks.createManagedScreen.mockReturnValue(screen.screen);
+    const view = renderVisual(createRef<ManagedAudioVisualResources>());
+    await settle();
+    view.unmount();
+    await settle();
+
+    expect(screen.disposeCalls).toBe(1);
+    expect(visual.closeCalls).toBe(1);
+  });
+
+  it('updates the region and rows without reopening the source', async () => {
+    const visual = createFakeVisualSource();
+    const screen = createFakeVisualScreen();
+    audioVisualMocks.openAudioVisual.mockResolvedValue({ kind: 'source', visualKind: 'waveform', source: visual.source, info: VISUAL_INFO, label: 'Track' });
+    managedScreenMocks.createManagedScreen.mockReturnValue(screen.screen);
+    const resources = createRef<ManagedAudioVisualResources>();
+    const view = renderVisual(resources);
+    await settle();
+    screen.rows = ['resized-row'];
+    view.rerender(
+      <VisualResourcesHarness ref={resources} enabled src="song.mp3" probe={AUDIO_PROBE} mode="waveform" width={20} height={8} />,
+    );
+    await settle();
+
+    expect(screen.regions.at(-1)).toEqual({ offsetCol: 1, offsetRow: 1, cols: 20, rows: 5 });
+    expect(resources.current?.placeholderRows).toEqual(['resized-row']);
+    expect(audioVisualMocks.openAudioVisual).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it('routes renderer failures to visual degradation without reporting a media error', async () => {
+    const failure = new Error('visual frame failed');
+    const visual = createFakeVisualSource(() => Promise.reject(failure));
+    const screen = createFakeVisualScreen();
+    const audio = createFakeAudio();
+    mediaProbeMocks.probeMediaFile.mockResolvedValue(AUDIO_PROBE);
+    ffmpegAudioMocks.createFfmpegAudioPlayer.mockReturnValue(audio.audio);
+    audioVisualMocks.openAudioVisual.mockResolvedValue({ kind: 'source', visualKind: 'waveform', source: visual.source, info: VISUAL_INFO, label: 'Track' });
+    managedScreenMocks.createManagedScreen.mockReturnValue(screen.screen);
+    const resources = createRef<ManagedAudioVisualResources>();
+    const onMediaError = vi.fn();
+    const FailureHarness = forwardRef<ManagedAudioVisualResources>((_, ref) => {
+      const managedAudio = useManagedResources({ src: 'song.mp3', onError: onMediaError });
+      const managed = useManagedVisualResources({ enabled: true, src: 'song.mp3', probe: managedAudio.probe, mode: 'waveform', width: 40, height: 12 });
+      useAudioVisualRenderer({
+        source: managed.source,
+        info: managed.info,
+        screen: managed.screen,
+        playing: false,
+        getElapsedMs: () => 0,
+        onReady: () => undefined,
+        onVisualError: managed.degradeToPlaceholder,
+      });
+      useImperativeHandle(ref, () => managed, [managed]);
+      return null;
+    });
+    const view = render(<FailureHarness ref={resources} />);
+    await settle();
+
+    expect(resources.current?.status).toBe('placeholder');
+    expect(onMediaError).not.toHaveBeenCalled();
+    expect(screen.disposeCalls).toBe(1);
+    expect(visual.closeCalls).toBe(1);
+    view.unmount();
+  });
+});
+
+describe('useAudioVisualRenderer', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('pushes immediately and becomes ready only after frame and source buffering clear', async () => {
+    let buffering = true;
+    const visual = createFakeVisualSource();
+    visual.source.isBuffering = () => buffering;
+    const screen = createFakeVisualScreen();
+    const onReady = vi.fn();
+    const renderer = createRef<AudioVisualRenderer>();
+    const view = render(
+      <VisualRendererHarness ref={renderer} source={visual.source} info={VISUAL_INFO} screen={screen.screen} playing={false} getElapsedMs={() => 250} onReady={onReady} onVisualError={vi.fn()} />,
+    );
+    await flush();
+    expect(screen.pushedFrames).toHaveLength(1);
+    expect(renderer.current?.ready).toBe(false);
+
+    buffering = false;
+    renderer.current?.repaint();
+    await flush();
+    expect(renderer.current?.ready).toBe(true);
+    expect(onReady).toHaveBeenCalledOnce();
+    view.unmount();
+  });
+
+  it('ticks at the visual frame rate while playing with an in-flight guard', async () => {
+    const frame = createDeferred<Uint8Array | null>();
+    const getFrameAt = vi.fn(() => frame.promise);
+    const visual = createFakeVisualSource(getFrameAt);
+    const screen = createFakeVisualScreen();
+    const view = render(
+      <VisualRendererHarness source={visual.source} info={VISUAL_INFO} screen={screen.screen} playing getElapsedMs={() => 500} onReady={vi.fn()} onVisualError={vi.fn()} />,
+    );
+    await advance(120);
+    expect(getFrameAt).toHaveBeenCalledTimes(1);
+    frame.resolve(new Uint8Array([1]));
+    await flush();
+    await advance(40);
+    expect(getFrameAt).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
+  it('ignores a stale fetch after source replacement', async () => {
+    const staleFrame = createDeferred<Uint8Array | null>();
+    const stale = createFakeVisualSource(() => staleFrame.promise);
+    const current = createFakeVisualSource(() => Promise.resolve(new Uint8Array([2])));
+    const screen = createFakeVisualScreen();
+    const onReady = vi.fn();
+    const view = render(
+      <VisualRendererHarness source={stale.source} info={VISUAL_INFO} screen={screen.screen} playing={false} getElapsedMs={() => 0} onReady={onReady} onVisualError={vi.fn()} />,
+    );
+    view.rerender(
+      <VisualRendererHarness source={current.source} info={VISUAL_INFO} screen={screen.screen} playing={false} getElapsedMs={() => 0} onReady={onReady} onVisualError={vi.fn()} />,
+    );
+    await flush();
+    staleFrame.resolve(new Uint8Array([1]));
+    await flush();
+
+    expect(screen.pushedFrames).toEqual([new Uint8Array([2])]);
+    expect(onReady).toHaveBeenCalledOnce();
+    view.unmount();
+  });
+
+  it('reports one visual error per source and stops its renderer', async () => {
+    const failure = new Error('frame failed');
+    const getFrameAt = vi.fn(() => Promise.reject(failure));
+    const visual = createFakeVisualSource(getFrameAt);
+    const screen = createFakeVisualScreen();
+    const onVisualError = vi.fn();
+    const renderer = createRef<AudioVisualRenderer>();
+    const view = render(
+      <VisualRendererHarness ref={renderer} source={visual.source} info={VISUAL_INFO} screen={screen.screen} playing getElapsedMs={() => 0} onReady={vi.fn()} onVisualError={onVisualError} />,
+    );
+    await flush();
+    renderer.current?.repaint();
+    await advance(200);
+
+    expect(onVisualError).toHaveBeenCalledOnce();
+    expect(onVisualError).toHaveBeenCalledWith(failure);
+    expect(getFrameAt).toHaveBeenCalledOnce();
+    view.unmount();
   });
 });
 

@@ -39,7 +39,12 @@ export const useManagedResources = ({
         if (!info.hasAudio) {
           throw new AudioError('AUDIO_UNAVAILABLE');
         }
-        setResources({ status: 'ready', audio, durationMs: probe.durationMs });
+        setResources({
+          status: 'ready',
+          audio,
+          durationMs: probe.durationMs,
+          probe: probe.kind === 'audio' ? probe : null,
+        });
         callbacksRef.current.onLoadedMetadata?.({
           duration: probe.durationMs / MS_PER_SECOND,
         });
@@ -47,7 +52,7 @@ export const useManagedResources = ({
       .catch((error: unknown) => {
         void audio.close().catch(() => undefined);
         if (!cancelled) {
-          setResources({ status: 'error', audio: null, durationMs: null });
+          setResources({ status: 'error', audio: null, durationMs: null, probe: null });
           callbacksRef.current.onError?.(error);
         }
       });

@@ -1,4 +1,4 @@
-import type { ManagedAudioResources } from './types.ts';
+import type { ManagedAudioResources, ManagedAudioVisualResources } from './types.ts';
 
 export const AUDIO_TICK_MS = 50;
 export const DRIFT_RESYNC_THRESHOLD_MS = 250;
@@ -17,4 +17,15 @@ export const INITIAL_MANAGED_AUDIO_RESOURCES: ManagedAudioResources = {
   status: 'loading',
   audio: null,
   durationMs: null,
+  probe: null,
+};
+
+export const INITIAL_MANAGED_AUDIO_VISUAL_RESOURCES: ManagedAudioVisualResources = {
+  status: 'loading',
+  label: null,
+  source: null,
+  info: null,
+  screen: null,
+  placeholderRows: [],
+  degradeToPlaceholder: () => undefined,
 };
