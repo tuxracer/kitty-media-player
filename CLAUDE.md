@@ -13,9 +13,11 @@
 
 Audio-only CLI routing depends on `--visual`, which defaults to `auto`.
 `resolveMediaPlayback` sends video probes to `openMediaSource` and audio probes
-to `openAudioVisual`. Automatic selection tries cover art and then waveform.
-Explicit artwork falls back to a title or filename placeholder, waveform tries
-only the waveform, and none opens no `FrameSource`. Video input ignores the
+to the shared `audioVisual` module through `openAudioVisual`. `openMediaSource`
+is video-only. Automatic selection tries cover art, then waveform, then a title
+or filename placeholder. Explicit artwork produces a placeholder when artwork
+is missing or cannot decode. Explicit waveform produces a placeholder when the
+waveform cannot open, and none opens no `FrameSource`. Video input ignores the
 option. Audio with an artwork or waveform source follows the existing visual
 Video path, including Screen creation before Ink. Audio with a placeholder or
 no visual skips graphics detection and renders `AudioPlayerView`, or uses
@@ -49,8 +51,9 @@ playback without a source renders `AudioPlayerView`, or runs
 `useManagedVisualResources` selects the source and creates a probe-free managed
 Screen after Ink owns stdin. `useAudioVisualRenderer` pumps frames directly to
 the Screen and blocks audio startup until the first frame or placeholder is
-ready. `width` and `height` size the whole component, including its optional
-controls row.
+ready. Unsupported Kitty display and runtime frame errors also degrade to the
+placeholder without calling the media `onError`. `width` and `height` size the
+whole component, including its optional controls row.
 
 ### Module map
 
@@ -65,7 +68,7 @@ controls row.
 - `src/fallbackAudioPlayer/` - audio-only fallback clock and raw-stdin controls without Ink or a Screen
 - `src/proceduralSource/` - the built-in demo source, a hue-cycling ball on a Lissajous path rendered as a pure function of time into a reused framebuffer
 - `src/mediaProbe/` - classifies a file or URL with one ffprobe run: a real video stream (embedded cover art marked attached_pic does not count) makes it video, otherwise an audio stream makes it audio-only with the cover art dimensions when an attached picture exists, and neither rejects with NO_PLAYABLE_STREAMS. Owns the duration measurement fallback for live-muxed files, mapped to the probed stream kind. ffmpegSource accepts this probe pre-computed so the cli never probes a file twice
-- `src/coverArtSource/` - FrameSource showing an audio file's embedded cover art as a static image, decoded once at open with a one-shot ffmpeg run. getFrameAt always returns the frame (the clock's buffering gate retries at the playhead on startup, seeks, resumes, and drift resyncs, and would strand on a source that goes quiet), at a nominal 10 fps so identical pushes stay cheap. An undecodable picture rejects open and the cli falls back to the waveform
+- `src/coverArtSource/` - FrameSource showing an audio file's embedded cover art as a static image, decoded once at open with a one-shot ffmpeg run. getFrameAt always returns the frame (the clock's buffering gate retries at the playhead on startup, seeks, resumes, and drift resyncs, and would strand on a source that goes quiet), at a nominal 10 fps so identical pushes stay cheap. An undecodable picture rejects open, then `audioVisual` chooses waveform for auto mode or a placeholder for artwork mode
 - `src/waveformSource/` - FrameSource rendering a live oscilloscope of an audio file. One ffmpeg process decodes the whole track to mono 8 kHz s16le PCM in a single pass into a preallocated buffer (about 57 MB per hour), so seeks are free window moves. getFrameAt draws min/max column spans of the window at the playhead, isBuffering holds the clock's gate until the decode is 2 s ahead, and a decoder death freezes the trace instead of failing playback
 - `src/ffmpegSource/` - decodes video files and http(s) URLs with bundled ffmpeg-static/ffprobe-static: ffprobe metadata probe, one streaming ffmpeg process decoding rawvideo rgb24 into a readahead queue (stream pause/resume backpressure, `isBuffering` reports true while it fills so the clock's gate can wait for a full buffer), respawned with `-ss` on seek or backward time jump, frames scaled to fit 960x540. `-ss` placement follows input seekability, detected once at open by `detectRangeSupport` (a one-byte Range request): input-side for local files and range-supporting servers, output-side (read from the start, discard up to the target) for non-seekable streams, and no `-ss` at all for a start at zero, because even `-ss 0` corrupts VP9 decoding of live-muxed matroska over non-seekable http
 - `src/playerLayout/` - `computePanelRegion` sizes the video panel's cell grid from the terminal size via kitty-motion's `fitToTerminal`, and `computeEmbeddedRegion` letterboxes a source frame into a fixed cell box for embedded mode (deliberately not via `fitToTerminal`, whose minimum-display floor distorts small boxes)

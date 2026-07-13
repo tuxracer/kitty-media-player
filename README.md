@@ -133,16 +133,22 @@ import { Audio } from 'kitty-media-player';
 
 `Audio` defaults to `visual={false}`, unlike the CLI which defaults to `auto`.
 `visual` enables automatic selection, `visual="artwork"` requests embedded
-artwork, and `visual="waveform"` requests the oscilloscope. When requested
-artwork is missing or cannot be decoded, the visual area shows the media title
-or filename instead. Automatic selection tries artwork first and then waveform.
+artwork, and `visual="waveform"` requests the oscilloscope. Automatic selection
+tries artwork first and then waveform. The visual area shows the media title or
+filename when forced artwork is unavailable, forced waveform creation fails,
+or both automatic choices fail. The same placeholder is used when the embedded
+terminal cannot display Kitty placeholders or a visual frame fails at runtime.
+These visual-only failures do not stop audio or call the media `onError`
+callback.
 
 Audio controls are shown by default. Set `controls={false}` to hide the row.
 The optional `width` and `height` values use terminal cells and size the whole
-component, including the controls row. Visuals default to 48 by 13 cells when
-no size is given. Keyboard input is opt-in with `keyboard`. Children render
-when the initial load or audio output fails. `AudioRef` follows the media subset
-of `VideoRef` without the video dimensions.
+component, including the controls row. When a visual is enabled and no size is
+given, the whole Audio component defaults to 48 by 13 cells. The default
+controls consume one row and leave 12 rows for the visual. Keyboard input is
+opt-in with `keyboard`. Children render when the initial load or audio output
+fails. `AudioRef` follows the media subset of `VideoRef` without the video
+dimensions.
 
 Beyond `Video`, the package exports the underlying pieces: the
 `FrameSource`/`FrameSourceInfo` contract, `createProceduralSource`,

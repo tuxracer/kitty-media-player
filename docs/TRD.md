@@ -5,13 +5,15 @@ see the [README](../README.md).
 
 ## Overview
 
-kitty-media-player has two rendering paths. The full player is an
-[Ink](https://github.com/vadimdemedes/ink) app whose video pixels are drawn by
+The CLI has four playback paths. Full visual playback is an
+[Ink](https://github.com/vadimdemedes/ink) app whose pixels are drawn by
 [kitty-motion](https://github.com/tuxracer/kitty-motion) through Kitty graphics
-Unicode placeholders. The placeholder cells are ordinary text that Ink lays
+Unicode placeholders. Visual fallback skips Ink and drives a kitty-motion
+Screen directly. Audio-only playback without a visual uses an Ink controls
+view, while forced fallback uses `fallbackAudioPlayer` without Ink or a Screen.
+The placeholder cells in the full visual path are ordinary text that Ink lays
 out, so the picture and the React-driven UI share the terminal without
-stepping on each other. The fallback player skips Ink entirely and drives a
-kitty-motion Screen directly, for terminals that cannot host the full player.
+stepping on each other.
 
 ## Startup sequence
 
@@ -24,13 +26,14 @@ tests can import it without executing the entry.
    exit 0 (CI-friendly, nothing is drawn).
 3. Open the playback resources. No argument opens the built-in
    `proceduralSource`. A file or http(s) URL argument is classified with one
-   `probeMediaFile` ffprobe run. Video input opens `ffmpegSource`. Audio-only
-   input passes the probe and `--visual` mode to `openAudioVisual`. `auto`
-   tries cover art and then waveform, `artwork` uses a title or filename
-   placeholder when art is unavailable, `waveform` requests the waveform,
-   and `none` opens no `FrameSource`. Video input ignores `--visual`. The
-   same classification answers the audio player's has-audio probe, so the
-   file is only ffprobed once. An
+   `probeMediaFile` ffprobe run. Video input goes through the video-only
+   `openMediaSource`, which opens `ffmpegSource`. Audio-only input goes through
+   the shared `audioVisual` module and passes the probe and `--visual` mode to
+   `openAudioVisual`. `auto` tries cover art and then waveform, `artwork` uses
+   a title or filename placeholder when art is unavailable, `waveform`
+   requests the waveform, and `none` opens no `FrameSource`. Video input
+   ignores `--visual`. The same classification answers the audio player's
+   has-audio probe, so the file is only ffprobed once. An
    open still running after `LOADING_DELAY_MS` shows a loading indicator on
    stderr (an animated spinner line on a TTY, erased again when the open
    finishes, or one plain notice elsewhere), since a remote probe can take
@@ -142,10 +145,16 @@ already-opened `audio` player.
 
 The `Audio` component has no visual by default. `visual` normalizes to `auto`,
 while `visual="artwork"` and `visual="waveform"` request one source directly.
-Its `width` and `height` size the whole component, so the visual receives the
-remaining rows after the optional controls row. Artwork failure or missing
-artwork in explicit artwork mode produces a centered title or filename
-placeholder instead of failing audio playback.
+Its `width` and `height` size the whole component. With a visual and no explicit
+size, the whole component is 48 by 13 cells. Default controls consume one row,
+leaving 12 rows for the visual.
+
+Every visual-only failure becomes a centered title or filename placeholder.
+This includes missing or undecodable forced artwork, a forced waveform that
+cannot open, automatic selection where artwork and waveform both fail, an
+embedded terminal without Kitty placeholder support, and a runtime visual
+frame error. Audio playback continues and the media `onError` callback is not
+called for these failures.
 
 `Audio` loads its optional source and constructs a probe-free managed Screen
 after Ink has rendered. It must not use terminal capability probes because
@@ -292,8 +301,9 @@ the decoded frame regardless of the requested timestamp (the playback
 clock's buffering gate retries at the playhead on startup, seeks, resumes,
 and drift resyncs, and would stall against a source that goes quiet),
 pushed at a nominal 10 fps so repeated identical frames stay cheap. An
-undecodable picture rejects `open()`, and `openMediaSource` falls back to
-`waveformSource`.
+undecodable picture rejects `open()`. The shared `audioVisual` selector tries
+`waveformSource` next in automatic mode and returns a placeholder in explicit
+artwork mode.
 
 ### waveformSource
 
