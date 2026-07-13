@@ -1,6 +1,8 @@
 import type { AudioPlayer } from '../audioPlayer/index.ts';
 
 export interface FallbackKeyInput {
+  readonly isRaw?: boolean;
+  readonly readableFlowing?: boolean | null;
   on(event: 'data', listener: (chunk: Buffer) => void): unknown;
   off(event: 'data', listener: (chunk: Buffer) => void): unknown;
   setRawMode?(mode: boolean): unknown;

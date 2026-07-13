@@ -24,6 +24,8 @@ export const runFallbackAudioPlayer = ({
   label,
 }: FallbackAudioPlayerOptions): Promise<void> =>
   new Promise((resolve) => {
+    const initialRawMode = input.isRaw ?? false;
+    const initiallyFlowing = input.readableFlowing === true;
     let playing = true;
     let elapsedMs = 0;
     let waiting = audio !== null;
@@ -31,6 +33,7 @@ export const runFallbackAudioPlayer = ({
     let anchorWallMs = Date.now();
     let anchorElapsedMs = 0;
     let quitting = false;
+    let pendingKeyText = '';
 
     const startAt = (targetMs: number): void => {
       if (audio === null) {
@@ -103,15 +106,21 @@ export const runFallbackAudioPlayer = ({
       quitting = true;
       clearInterval(interval);
       input.off('data', onKey);
-      input.setRawMode?.(false);
-      input.pause?.();
-      void (audio?.close() ?? Promise.resolve())
+      input.setRawMode?.(initialRawMode);
+      if (initiallyFlowing) {
+        input.resume?.();
+      } else {
+        input.pause?.();
+      }
+      void Promise.resolve()
+        .then(() => audio?.close())
         .catch(() => undefined)
         .then(resolve);
     };
 
     const onKey = (chunk: Buffer): void => {
-      const text = chunk.toString('utf8');
+      const text = pendingKeyText + chunk.toString('utf8');
+      pendingKeyText = '';
       let index = 0;
       while (index < text.length) {
         if (text.startsWith(KEY_ARROW_RIGHT, index)) {
@@ -123,6 +132,15 @@ export const runFallbackAudioPlayer = ({
           seekToMs(elapsedMs - SEEK_STEP_MS);
           index += KEY_ARROW_LEFT.length;
           continue;
+        }
+
+        const remainingText = text.slice(index);
+        if (
+          KEY_ARROW_RIGHT.startsWith(remainingText) ||
+          KEY_ARROW_LEFT.startsWith(remainingText)
+        ) {
+          pendingKeyText = remainingText;
+          return;
         }
 
         const key = text[index];
